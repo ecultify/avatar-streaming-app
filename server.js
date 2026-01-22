@@ -32,12 +32,12 @@ app.post('/api/web-search', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${OPENAI_API_KEY}`
       },
-      body: JSON.stringify({
-        model: 'gpt-4o',
-        tools: [{ type: 'web_search' }],
-        input: query,
-        instructions: 'You are a helpful assistant. Provide direct, brief answers in 2-3 sentences for voice output. Do not mention that you searched the web, just give the answer.'
-      })
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          tools: [{ type: 'web_search' }],
+          input: query,
+          instructions: 'You are a helpful assistant. Provide direct, brief answers in 2-3 sentences for voice output. Do not mention that you searched the web, dont mention or spell out links, just give the answer.'
+        })
     });
 
     if (!response.ok) {

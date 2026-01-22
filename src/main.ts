@@ -156,7 +156,7 @@ async function fetchAccessToken(): Promise<string> {
     const response = await fetch('https://api.heygen.com/v1/streaming.create_token', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${HEYGEN_API_TOKEN}`,
+        'x-api-key': HEYGEN_API_TOKEN,
         'Content-Type': 'application/json'
       }
     })
@@ -291,7 +291,13 @@ async function startVoiceChat() {
     updateHeyGenStatus('Starting voice mode with OpenAI Whisper...')
     
     // Request microphone access
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      } 
+    })
     
     isVoiceModeActive = true
     audioChunks = []
@@ -442,6 +448,8 @@ async function startVoiceChat() {
   }
 }
 
+let recordingTimeout: number | null = null
+
 function startRecording() {
   if (!mediaRecorder || !isVoiceModeActive) return
   
@@ -454,8 +462,13 @@ function startRecording() {
     stopSpeakingBtn.style.display = 'block'
     console.log('[Voice] Recording started')
     
+    // Clear existing timeout if any
+    if (recordingTimeout) {
+      clearTimeout(recordingTimeout)
+    }
+
     // Stop recording after 10 seconds (or when user clicks button)
-    setTimeout(() => {
+    recordingTimeout = window.setTimeout(() => {
       if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
         stopRecording()
       }
@@ -470,6 +483,11 @@ function startRecording() {
 function stopRecording() {
   if (!mediaRecorder || !isRecording) return
   
+  if (recordingTimeout) {
+    clearTimeout(recordingTimeout)
+    recordingTimeout = null
+  }
+
   try {
     mediaRecorder.stop()
     isRecording = false
@@ -589,14 +607,14 @@ async function createDIDTalk(text: string): Promise<string> {
   
   console.log('[D-ID] Creating talk with text:', text)
   
-  const response = await fetch('https://api.d-id.com/talks', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${DID_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestData)
-  })
+    const response = await fetch('https://api.d-id.com/talks', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${btoa(DID_API_KEY)}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
+    })
   
   if (!response.ok) {
     const errorText = await response.text()
@@ -615,12 +633,12 @@ async function pollDIDTalkStatus(talkId: string): Promise<void> {
   didSessionInfo.textContent = `Talk ID: ${talkId}`
   
   const checkStatus = async () => {
-    try {
-      const response = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-        headers: {
-          'Authorization': `Basic ${DID_API_KEY}`
-        }
-      })
+      try {
+        const response = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+          headers: {
+            'Authorization': `Basic ${btoa(DID_API_KEY)}`
+          }
+        })
       
       if (!response.ok) {
         throw new Error('Failed to check talk status')
