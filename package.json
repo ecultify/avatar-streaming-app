@@ -1,0 +1,26 @@
+{
+  "name": "streaming-avatar-demo1",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "backend": "node server.js",
+    "start": "concurrently \"npm run backend\" \"npm run dev\""
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "@heygen/streaming-avatar": "^2.1.0",
+    "livekit-client": "^2.17.0",
+    "openai": "^6.16.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5"
+  }
+}

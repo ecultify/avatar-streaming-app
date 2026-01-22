@@ -1,0 +1,385 @@
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 1.8em;
+  line-height: 1.1;
+  font-weight: 400;
+  margin-bottom: 1.5rem;
+}
+
+h2 {
+  font-size: 1.2em;
+  font-weight: 400;
+  margin: 0;
+}
+
+#app {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.vanilla:hover {
+  filter: drop-shadow(0 0 2em #3178c6aa);
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.platform-selector {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin: 1.5rem 0;
+  padding: 0.5rem;
+  background: rgba(100, 108, 255, 0.05);
+  border-radius: 8px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.tab-btn.active {
+  background: rgba(100, 108, 255, 0.2);
+  border-color: #646cff;
+}
+
+.avatar-container {
+  display: flex;
+  gap: 2rem;
+  justify-content: center;
+  margin-top: 2rem;
+}
+
+.avatar-section {
+  display: none;
+  flex-direction: column;
+  width: 100%;
+  max-width: 800px;
+}
+
+.avatar-section.active {
+  display: flex;
+}
+
+.avatar-container.side-by-side .avatar-section {
+  max-width: 700px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0 0.5rem;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.mode-selector {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: rgba(100, 108, 255, 0.05);
+  border-radius: 6px;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.mode-btn.active {
+  background: rgba(100, 108, 255, 0.2);
+  border-color: #646cff;
+}
+
+.mode-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-controls {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 0.5rem;
+}
+
+.chat-controls input {
+  flex: 1;
+  padding: 0.75rem;
+  font-size: 0.9em;
+  border: 1px solid rgba(100, 108, 255, 0.3);
+  border-radius: 6px;
+  background: #1a1a1a;
+  color: #fff;
+  font-family: inherit;
+}
+
+.chat-controls input:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+.chat-controls button {
+  padding: 0.75rem 1.5rem;
+  background: #646cff;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.chat-controls button:hover:not(:disabled) {
+  background: #535bf2;
+}
+
+.voice-controls {
+  padding: 1rem;
+  text-align: center;
+}
+
+.voice-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: rgba(100, 108, 255, 0.1);
+  border-radius: 8px;
+}
+
+.pulse-indicator {
+  width: 12px;
+  height: 12px;
+  background: #646cff;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+.video-container {
+  margin: 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(100, 108, 255, 0.2);
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  max-width: 800px;
+  position: relative;
+}
+
+.avatar-section video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: #000;
+}
+
+.did-container {
+  position: relative;
+}
+
+.placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+  color: #ccc;
+  font-size: 0.9em;
+  text-align: center;
+  padding: 2rem;
+}
+
+.placeholder-content {
+  max-width: 400px;
+  width: 100%;
+}
+
+.placeholder-content p {
+  margin: 0 0 1rem 0;
+  line-height: 1.5;
+  color: #aaa;
+}
+
+#didTextInput {
+  width: 100%;
+  padding: 0.75rem;
+  font-size: 0.9em;
+  border: 1px solid rgba(100, 108, 255, 0.3);
+  border-radius: 6px;
+  background: #1a1a1a;
+  color: #fff;
+  font-family: inherit;
+  margin-top: 0.5rem;
+}
+
+#didTextInput:focus {
+  outline: none;
+  border-color: #646cff;
+}
+
+#didVideo {
+  display: none;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.info {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.info p {
+  margin: 0.25rem 0;
+  font-size: 0.8em;
+  color: #888;
+}
+
+@media (max-width: 1400px) {
+  .avatar-container.side-by-side {
+    flex-direction: column;
+  }
+  
+  .avatar-container.side-by-side .avatar-section {
+    max-width: 800px;
+  }
+}
+
+@media (max-width: 768px) {
+  .video-container {
+    aspect-ratio: 4 / 3;
+  }
+  
+  h1 {
+    font-size: 1.4em;
+  }
+  
+  .platform-selector {
+    max-width: 100%;
+  }
+  
+  .tab-btn {
+    font-size: 0.85em;
+    padding: 0.4rem 0.8rem;
+  }
+}
+
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
