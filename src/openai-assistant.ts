@@ -24,20 +24,6 @@ export class OpenAIAssistant {
     this.thread = await this.client.beta.threads.create();
   }
 
-  private needsWebSearch(query: string): boolean {
-    const webSearchKeywords = [
-      'weather', 'temperature', 'forecast',
-      'news', 'latest', 'current', 'today', 'now',
-      'stock', 'price', 'market',
-      'score', 'game', 'match',
-      'what is happening', 'what happened',
-      'breaking', 'update'
-    ];
-    
-    const lowerQuery = query.toLowerCase();
-    return webSearchKeywords.some(keyword => lowerQuery.includes(keyword));
-  }
-
   private async getResponseWithWebSearch(userMessage: string): Promise<string> {
     try {
       console.log('[WebSearch] Calling backend for real-time search');
@@ -72,19 +58,17 @@ export class OpenAIAssistant {
       throw new Error("Assistant not initialized. Call initialize() first.");
     }
 
-    // Check if query needs web search
-    if (this.needsWebSearch(userMessage)) {
-      console.log('[Assistant] Query needs web search, using Responses API');
-      try {
-        return await this.getResponseWithWebSearch(userMessage);
-      } catch (error) {
-        console.error('[Assistant] Web search failed, falling back to regular assistant');
-        // Fall through to regular assistant
-      }
+    // Always use backend real-time search for every query
+    console.log('[Assistant] Using backend real-time search for query:', userMessage);
+    try {
+      return await this.getResponseWithWebSearch(userMessage);
+    } catch (error) {
+      console.error('[Assistant] Web search failed, falling back to regular assistant');
+      // Fall through to regular assistant
     }
 
-    // Use regular Assistants API for non-web-search queries
-    console.log('[Assistant] Using Assistants API');
+    // Use regular Assistants API as fallback
+    console.log('[Assistant] Using Assistants API fallback');
     
     await this.client.beta.threads.messages.create(this.thread.id, {
       role: "user",
