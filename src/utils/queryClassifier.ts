@@ -1,25 +1,66 @@
 import OpenAI from 'openai';
-import { CLASSIFICATION_PROMPT } from '../config/prompts';
+import { MODELS } from '../config';
+import { CLASSIFICATION_PROMPT, getInstantResponse } from '../config/prompts';
 
-export type QueryType = 'web_search' | 'direct';
+export type QueryType = 'web_search' | 'direct' | 'instant';
 
-const GREETING_PATTERNS = /^(hi|hello|hey|howdy|good\s*(morning|afternoon|evening|night)|what'?s?\s*up|yo|sup|greetings)/i;
-const FAREWELL_PATTERNS = /^(bye|goodbye|see\s*ya|later|take\s*care|good\s*night|have\s*a\s*good)/i;
-const THANKS_PATTERNS = /^(thanks?|thank\s*you|appreciate|thx)/i;
-const REALTIME_PATTERNS = /(latest|current|today|right\s*now|this\s*(week|month|year)|recent|happening|news|stock|price|weather|score|crypto|bitcoin|live)/i;
+export interface ClassificationResult {
+  type: QueryType;
+  instantResponse?: string;
+}
 
-export function quickClassify(transcript: string): QueryType | null {
-  const trimmed = transcript.trim().toLowerCase();
-  const wordCount = trimmed.split(/\s+/).length;
+const WEB_SEARCH_PATTERNS = [
+  /\b(latest|current|recent|today'?s?|now|right now|this week|this month)\b/i,
+  /\b(weather|temperature|forecast)\b/i,
+  /\b(stock|price|trading|market)\s*(price|at|is|of)?\b/i,
+  /\b(bitcoin|btc|ethereum|eth|crypto)\s*(price|at|is)?\b/i,
+  /\b(news|headlines|happening)\b/i,
+  /\b(score|game|match|playing)\s*(today|now|live)?\b/i,
+  /\bwho (is|are) (the )?(current|new)\b/i,
+  /\b(is|are|did|does|has|have)\s+.+\s+(still|yet|anymore|now)\b/i,
+  /\bon (netflix|youtube|spotify|hulu|disney|amazon prime|hbo)\b/i,
+  /\b(released|came out|launched|announced)\s*(today|recently|this)?\b/i,
+];
+
+const INSTANT_PATTERNS = [
+  /^(hi|hello|hey|yo|sup|hiya)[\s!.,?]*$/i,
+  /^good\s+(morning|afternoon|evening|night)[\s!.,?]*$/i,
+  /^(thanks?|thank\s*you|thx)[\s!.,?]*$/i,
+  /^(bye|goodbye|see\s*ya|later|cya)[\s!.,?]*$/i,
+  /^(how\s+are\s+you|how'?s\s+it\s+going|what'?s\s+up|whats\s+up)[\s!?.,]*$/i,
+  /^(ok|okay|sure|got\s+it|sounds\s+good|perfect|great|cool|nice)[\s!.,?]*$/i,
+  /^(yes|no|yeah|nah|yep|nope)[\s!.,?]*$/i,
+];
+
+const DIRECT_PATTERNS = [
+  /^(hi|hello|hey|yo|sup|hiya)[\s!.,?]*$/i,
+  /^good\s+(morning|afternoon|evening|night)[\s!.,?]*$/i,
+  /^(thanks?|thank\s*you|thx)[\s!.,?]*$/i,
+  /^(bye|goodbye|see\s*ya|later|cya)[\s!.,?]*$/i,
+  /^(how\s+are\s+you|how'?s\s+it\s+going|what'?s\s+up)[\s!?.,]*$/i,
+  /^(ok|okay|sure|got\s+it|sounds\s+good|perfect|great|cool|nice)[\s!.,?]*$/i,
+  /^(yes|no|yeah|nah|yep|nope)[\s!.,?]*$/i,
+];
+
+function preClassify(transcript: string): QueryType | null {
+  const trimmed = transcript.trim();
   
-  if (wordCount <= 4) {
-    if (GREETING_PATTERNS.test(trimmed)) return 'direct';
-    if (FAREWELL_PATTERNS.test(trimmed)) return 'direct';
-    if (THANKS_PATTERNS.test(trimmed)) return 'direct';
+  for (const pattern of INSTANT_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return 'instant';
+    }
   }
   
-  if (REALTIME_PATTERNS.test(trimmed)) {
-    return 'web_search';
+  for (const pattern of WEB_SEARCH_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return 'web_search';
+    }
+  }
+  
+  for (const pattern of DIRECT_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return 'direct';
+    }
   }
   
   return null;
@@ -27,17 +68,25 @@ export function quickClassify(transcript: string): QueryType | null {
 
 export async function classifyQuery(
   transcript: string,
-  openaiClient: OpenAI
-): Promise<QueryType> {
-  const quickResult = quickClassify(transcript);
-  if (quickResult !== null) {
-    console.log('[Classifier] Quick classification:', quickResult);
-    return quickResult;
+  openai: OpenAI
+): Promise<ClassificationResult> {
+  const preClassification = preClassify(transcript);
+  
+  if (preClassification === 'instant') {
+    const instantResponse = getInstantResponse(transcript);
+    if (instantResponse) {
+      return { type: 'instant', instantResponse };
+    }
+    return { type: 'direct' };
+  }
+  
+  if (preClassification !== null) {
+    return { type: preClassification };
   }
   
   try {
-    const response = await openaiClient.chat.completions.create({
-      model: "gpt-4o-mini",
+    const response = await openai.chat.completions.create({
+      model: MODELS.CLASSIFIER,
       messages: [
         { role: "system", content: CLASSIFICATION_PROMPT },
         { role: "user", content: transcript }
@@ -46,12 +95,11 @@ export async function classifyQuery(
       temperature: 0
     });
     
-    const classification = response.choices[0].message.content?.toLowerCase().trim();
-    const result: QueryType = classification === 'web_search' ? 'web_search' : 'direct';
-    console.log('[Classifier] GPT classification:', result);
-    return result;
+    const result = response.choices[0].message.content?.toLowerCase().trim();
+    return { type: result === 'web_search' ? 'web_search' : 'direct' };
+    
   } catch (error) {
-    console.error('[Classifier] Error, defaulting to direct:', error);
-    return 'direct';
+    console.error('[Classifier] LLM classification failed:', error);
+    return { type: 'direct' };
   }
 }

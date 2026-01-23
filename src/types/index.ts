@@ -1,4 +1,4 @@
-export type QueryType = 'web_search' | 'direct';
+export type QueryType = 'web_search' | 'direct' | 'instant';
 
 export interface ProcessQueryRequest {
   transcript: string;
@@ -10,26 +10,25 @@ export interface ProcessQueryResponse {
   queryType: QueryType;
   processingTime: number;
   sessionId: string;
+  conversationId?: string;
   cached?: boolean;
 }
 
-export interface VADConfig {
-  positiveSpeechThreshold: number;
-  negativeSpeechThreshold: number;
-  minSpeechFrames: number;
-  preSpeechPadFrames: number;
-  redemptionFrames: number;
+export interface ClassificationResult {
+  type: QueryType;
+  instantResponse?: string;
 }
 
 export interface AvatarState {
+  isConnected: boolean;
   isListening: boolean;
   isProcessing: boolean;
   isSpeaking: boolean;
-  isConnected: boolean;
+  vadActive: boolean;
 }
 
-export interface CacheEntry {
-  response: string;
-  timestamp: number;
-  queryType: QueryType;
+export interface SessionData {
+  sessionId: string;
+  conversationId?: string;
+  createdAt: number;
 }

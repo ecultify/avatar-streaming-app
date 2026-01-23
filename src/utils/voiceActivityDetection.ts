@@ -1,38 +1,51 @@
 import { MicVAD } from "@ricky0123/vad-web";
-import type { RealTimeVADOptions } from "@ricky0123/vad-web";
+import { VAD_CONFIG } from '../config';
 
-interface VADCallbacks {
+export interface VADCallbacks {
   onSpeechStart: () => void;
   onSpeechEnd: (audioBlob: Blob) => void;
-  onVADMisfire: () => void;
+  onVADMisfire?: () => void;
 }
 
 let vadInstance: MicVAD | null = null;
 
 export async function initializeVAD(callbacks: VADCallbacks): Promise<MicVAD> {
-  const vadOptions: Partial<RealTimeVADOptions> = {
-    onSpeechStart: () => {
-      console.log("[VAD] Speech detected - listening...");
-      callbacks.onSpeechStart();
-    },
-    onSpeechEnd: (audio: Float32Array) => {
-      console.log("[VAD] Speech ended - processing...");
-      const wavBlob = float32ArrayToWav(audio, 16000);
-      callbacks.onSpeechEnd(wavBlob);
-    },
-    onVADMisfire: () => {
-      console.log("[VAD] Misfire - noise detected but not speech");
-      callbacks.onVADMisfire();
-    },
-    positiveSpeechThreshold: 0.85,
-    negativeSpeechThreshold: 0.35,
-    minSpeechMs: 200,
-    preSpeechPadMs: 300,
-    redemptionMs: 200,
-  };
-
-  vadInstance = await MicVAD.new(vadOptions);
-  return vadInstance;
+  try {
+    const vadOptions: any = {
+      onSpeechStart: () => {
+        console.log("[VAD] Speech detected - listening...");
+        callbacks.onSpeechStart();
+      },
+      onSpeechEnd: (audio: Float32Array) => {
+        console.log("[VAD] Speech ended - processing...");
+        const wavBlob = float32ArrayToWav(audio, 16000);
+        callbacks.onSpeechEnd(wavBlob);
+      },
+      onVADMisfire: () => {
+        console.log("[VAD] Noise filtered (misfire)");
+        callbacks.onVADMisfire?.();
+      },
+      positiveSpeechThreshold: VAD_CONFIG.POSITIVE_SPEECH_THRESHOLD,
+      negativeSpeechThreshold: VAD_CONFIG.NEGATIVE_SPEECH_THRESHOLD,
+      minSpeechFrames: VAD_CONFIG.MIN_SPEECH_FRAMES,
+      preSpeechPadFrames: VAD_CONFIG.PRE_SPEECH_PAD_FRAMES,
+      redemptionFrames: VAD_CONFIG.REDEMPTION_FRAMES,
+    };
+    
+    if (VAD_CONFIG.USE_CDN) {
+      const cdnBase = `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${VAD_CONFIG.CDN_VERSION}/dist`;
+      vadOptions.modelURL = `${cdnBase}/silero_vad_legacy.onnx`;
+      vadOptions.workletURL = `${cdnBase}/vad.worklet.bundle.min.js`;
+    }
+    
+    vadInstance = await MicVAD.new(vadOptions);
+    console.log("[VAD] Initialized successfully");
+    return vadInstance;
+    
+  } catch (error) {
+    console.error("[VAD] Initialization failed:", error);
+    throw error;
+  }
 }
 
 export function startVAD(): void {
@@ -49,12 +62,23 @@ export function pauseVAD(): void {
   }
 }
 
+export function resumeVAD(): void {
+  if (vadInstance) {
+    vadInstance.start();
+    console.log("[VAD] Resumed");
+  }
+}
+
 export function destroyVAD(): void {
   if (vadInstance) {
     vadInstance.destroy();
     vadInstance = null;
     console.log("[VAD] Destroyed");
   }
+}
+
+export function isVADActive(): boolean {
+  return vadInstance !== null;
 }
 
 function float32ArrayToWav(audioData: Float32Array, sampleRate: number): Blob {

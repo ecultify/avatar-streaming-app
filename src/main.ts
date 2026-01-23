@@ -4,8 +4,8 @@ import StreamingAvatar, {
   StreamingEvents,
   TaskType,
 } from '@heygen/streaming-avatar'
-import { OpenAIAssistant } from './openai-assistant'
-import { initializeVAD, startVAD, pauseVAD, destroyVAD } from './utils/voiceActivityDetection'
+import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './utils/voiceActivityDetection'
+import { API_CONFIG, AVATAR_CONFIG } from './config'
 
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
@@ -15,6 +15,10 @@ interface DIDTalkResponse {
   id: string;
   result_url?: string;
   status: string;
+}
+
+function generateSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -92,7 +96,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 `
 
 let avatar: StreamingAvatar | null = null
-let openaiAssistant: OpenAIAssistant | null = null
+let sessionId = generateSessionId()
 let sessionData: any = null
 let currentMode: 'text' | 'voice' = 'text'
 let didPollingInterval: number | null = null
@@ -168,6 +172,25 @@ async function fetchAccessToken(): Promise<string> {
   }
 }
 
+async function getAIResponse(transcript: string): Promise<string> {
+  const response = await fetch(`${API_CONFIG.BACKEND_URL}/api/process-query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transcript,
+      sessionId
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Backend API error: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  console.log(`[API] ${data.queryType} response (${data.processingTime}ms)`);
+  return data.response;
+}
+
 async function initializeAvatarSession() {
   heygenStartBtn.disabled = true
   updateHeyGenStatus('Creating session...')
@@ -175,13 +198,7 @@ async function initializeAvatarSession() {
   try {
     const token = await fetchAccessToken()
     avatar = new StreamingAvatar({ token })
-
-    if (OPENAI_API_KEY) {
-      updateHeyGenStatus('Initializing AI assistant...')
-      openaiAssistant = new OpenAIAssistant(OPENAI_API_KEY)
-      await openaiAssistant.initialize()
-      console.log('[HeyGen] OpenAI Assistant initialized')
-    }
+    sessionId = generateSessionId()
 
     avatar.on(StreamingEvents.STREAM_READY, handleStreamReady)
     avatar.on(StreamingEvents.STREAM_DISCONNECTED, handleStreamDisconnected)
@@ -199,14 +216,17 @@ async function initializeAvatarSession() {
     avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
       voiceStatus.textContent = 'Waiting for you to speak...'
       isAvatarSpeaking = false
+      if (isVoiceModeActive && vadInitialized) {
+        resumeVAD()
+      }
     })
 
     updateHeyGenStatus('Starting avatar...')
     sessionData = await avatar.createStartAvatar({
       quality: AvatarQuality.High,
-      avatarName: 'Marianne_Chair_Sitting_public',
+      avatarName: AVATAR_CONFIG.AVATAR_ID,
       voice: {
-        voiceId: '2d5b0e6cf36f460aa7fc47e3eee4ba54'
+        voiceId: AVATAR_CONFIG.VOICE_ID
       },
       language: 'en',
       disableIdleTimeout: false
@@ -245,15 +265,15 @@ function handleStreamDisconnected() {
 }
 
 async function handleSpeak() {
-  if (avatar && openaiAssistant && chatInput.value) {
+  if (avatar && chatInput.value) {
     const userMessage = chatInput.value
     chatInput.value = ''
     sendBtn.disabled = true
     
     try {
       updateHeyGenStatus('Getting AI response...')
-      const response = await openaiAssistant.processWithBackend(userMessage)
-      console.log('[HeyGen] OpenAI response:', response)
+      const response = await getAIResponse(userMessage)
+      console.log('[HeyGen] AI response:', response)
       
       updateHeyGenStatus('Avatar speaking...')
       await avatar.speak({
@@ -268,8 +288,6 @@ async function handleSpeak() {
       updateHeyGenStatus('Error: ' + error)
       sendBtn.disabled = false
     }
-  } else if (!openaiAssistant) {
-    updateHeyGenStatus('OpenAI not configured')
   }
 }
 
@@ -280,6 +298,7 @@ let isRecording = false
 let isAvatarSpeaking = false
 let isProcessingAudio = false
 let vadInitialized = false
+let useFallbackRecording = false
 
 const MIN_AUDIO_SIZE = 5000;
 const MIN_TRANSCRIPT_LENGTH = 2;
@@ -321,148 +340,153 @@ function isValidTranscript(transcript: string): boolean {
   return true;
 }
 
-async function startVoiceChat() {
-  if (!avatar || !openaiAssistant) return
+async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, audioBlob.type.includes('wav') ? 'audio.wav' : 'audio.webm');
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'en');
   
-  try {
-    updateHeyGenStatus('Starting voice mode with VAD...')
-    isVoiceModeActive = true
-    
-    if (!vadInitialized) {
-      await initializeVAD({
-        onSpeechStart: () => {
-          if (!isAvatarSpeaking && !isProcessingAudio) {
-            isRecording = true
-            voiceStatus.textContent = 'Listening... (speech detected)'
-            stopSpeakingBtn.style.display = 'block'
-            console.log('[VAD] Speech started')
-          }
-        },
-        onSpeechEnd: async (audioBlob: Blob) => {
-          isRecording = false
-          stopSpeakingBtn.style.display = 'none'
-          
-          if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
-            console.log('[VAD] Ignoring speech end - avatar speaking or processing')
-            return
-          }
-          
-          console.log('[VAD] Speech ended, audio size:', audioBlob.size)
-          await processVADAudio(audioBlob)
-        },
-        onVADMisfire: () => {
-          console.log('[VAD] Misfire - background noise filtered')
-          voiceStatus.textContent = 'Listening... (noise filtered)'
-        }
-      })
-      vadInitialized = true
-      console.log('[VAD] Initialized successfully')
-    }
-    
-    startVAD()
-    voiceStatus.textContent = 'Listening... (speak anytime)'
-    updateHeyGenStatus('Voice mode active with VAD - Speak now')
-    console.log('[Voice] VAD-based voice mode started')
-    
-  } catch (error) {
-    console.error('[Voice] Error starting VAD voice mode:', error)
-    updateHeyGenStatus('VAD failed, falling back to manual recording...')
-    await startVoiceChatFallback()
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENAI_API_KEY}`
+    },
+    body: formData
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Whisper API error: ${response.status}`);
   }
+  
+  const data = await response.json();
+  return data.text || '';
 }
 
-async function processVADAudio(audioBlob: Blob) {
+async function processUserSpeech(audioBlob: Blob): Promise<void> {
+  if (isProcessingAudio || isAvatarSpeaking) {
+    console.log('[Voice] Busy, ignoring audio');
+    return;
+  }
+  
   if (audioBlob.size < MIN_AUDIO_SIZE) {
-    console.log('[VAD] Audio too short, skipping')
-    voiceStatus.textContent = 'Listening... (speak longer)'
-    return
+    console.log('[Voice] Audio too short, skipping');
+    voiceStatus.textContent = 'Listening... (speak longer)';
+    return;
   }
 
-  isProcessingAudio = true
-  pauseVAD()
-  voiceStatus.textContent = 'Transcribing...'
-  updateHeyGenStatus('Transcribing with Whisper...')
+  isProcessingAudio = true;
+  pauseVAD();
   
   try {
-    const audioFile = new File([audioBlob], 'audio.wav', { type: 'audio/wav' })
+    voiceStatus.textContent = 'Transcribing...';
+    updateHeyGenStatus('Transcribing...');
     
-    console.log('[VAD] Sending audio to Whisper, size:', audioBlob.size)
-    const formData = new FormData()
-    formData.append('file', audioFile)
-    formData.append('model', 'whisper-1')
-    formData.append('language', 'en')
-    
-    const transcription = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData
-    })
-    
-    if (!transcription.ok) {
-      throw new Error(`Whisper API error: ${transcription.status}`)
-    }
-    
-    const result = await transcription.json()
-    const transcript = result.text
-    
-    console.log('[VAD] Whisper transcript:', transcript)
+    const transcript = await transcribeAudio(audioBlob);
+    console.log('[Voice] Transcript:', transcript);
     
     if (!isValidTranscript(transcript)) {
-      voiceStatus.textContent = 'No clear speech - try again'
-      updateHeyGenStatus('Voice mode active - Speak now')
-      isProcessingAudio = false
-      if (isVoiceModeActive) startVAD()
-      return
+      voiceStatus.textContent = 'No clear speech - try again';
+      updateHeyGenStatus('Voice mode active - Speak now');
+      isProcessingAudio = false;
+      if (isVoiceModeActive && vadInitialized) resumeVAD();
+      return;
     }
     
-    voiceStatus.textContent = 'Getting AI response...'
-    updateHeyGenStatus('Processing...')
+    voiceStatus.textContent = 'Getting AI response...';
+    updateHeyGenStatus('Processing...');
     
-    const response = await openaiAssistant!.processWithBackend(transcript)
-    console.log('[VAD] AI response:', response)
+    const response = await getAIResponse(transcript);
+    console.log('[Voice] AI response:', response);
     
     if (!avatar || !isVoiceModeActive) {
-      console.log('[VAD] Session ended, stopping')
-      isProcessingAudio = false
-      return
+      console.log('[Voice] Session ended');
+      isProcessingAudio = false;
+      return;
     }
     
-    voiceStatus.textContent = 'Avatar speaking...'
-    isAvatarSpeaking = true
+    voiceStatus.textContent = 'Avatar speaking...';
+    isAvatarSpeaking = true;
+    
     await avatar.speak({
       text: response,
       taskType: TaskType.REPEAT
-    })
-    isAvatarSpeaking = false
+    });
     
-    voiceStatus.textContent = 'Listening...'
-    updateHeyGenStatus('Voice mode active - Speak now')
-    isProcessingAudio = false
+    isAvatarSpeaking = false;
+    voiceStatus.textContent = 'Listening...';
+    updateHeyGenStatus('Voice mode active - Speak now');
+    isProcessingAudio = false;
     
-    if (isVoiceModeActive) {
-      startVAD()
+    if (isVoiceModeActive && vadInitialized) {
+      resumeVAD();
     }
     
   } catch (error) {
-    console.error('[VAD] Error processing audio:', error)
-    voiceStatus.textContent = 'Error - Try again'
-    updateHeyGenStatus('Voice error')
-    isProcessingAudio = false
-    isAvatarSpeaking = false
+    console.error('[Voice] Error:', error);
+    voiceStatus.textContent = 'Error - Try again';
+    updateHeyGenStatus('Voice error');
+    isProcessingAudio = false;
+    isAvatarSpeaking = false;
     
-    if (isVoiceModeActive) {
-      setTimeout(() => startVAD(), 1000)
+    if (isVoiceModeActive && vadInitialized) {
+      setTimeout(() => resumeVAD(), 1000);
     }
+  }
+}
+
+async function startVoiceChatWithVAD() {
+  if (!avatar) return;
+  
+  try {
+    updateHeyGenStatus('Starting voice mode with VAD...');
+    isVoiceModeActive = true;
+    
+    await initializeVAD({
+      onSpeechStart: () => {
+        if (!isAvatarSpeaking && !isProcessingAudio) {
+          isRecording = true;
+          voiceStatus.textContent = 'Listening... (speech detected)';
+          stopSpeakingBtn.style.display = 'block';
+          console.log('[VAD] Speech started');
+        }
+      },
+      onSpeechEnd: async (audioBlob: Blob) => {
+        isRecording = false;
+        stopSpeakingBtn.style.display = 'none';
+        
+        if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
+          console.log('[VAD] Ignoring - busy');
+          return;
+        }
+        
+        console.log('[VAD] Speech ended, size:', audioBlob.size);
+        await processUserSpeech(audioBlob);
+      },
+      onVADMisfire: () => {
+        console.log('[VAD] Noise filtered');
+        voiceStatus.textContent = 'Listening... (noise filtered)';
+      }
+    });
+    
+    vadInitialized = true;
+    startVAD();
+    voiceStatus.textContent = 'Listening... (speak anytime)';
+    updateHeyGenStatus('Voice mode active with VAD');
+    console.log('[VAD] Voice mode started');
+    
+  } catch (error) {
+    console.error('[VAD] Failed:', error);
+    updateHeyGenStatus('VAD failed, using fallback...');
+    useFallbackRecording = true;
+    await startVoiceChatFallback();
   }
 }
 
 async function startVoiceChatFallback() {
-  if (!avatar || !openaiAssistant) return
+  if (!avatar) return;
   
   try {
-    updateHeyGenStatus('Starting voice mode (fallback)...')
+    updateHeyGenStatus('Starting voice mode (fallback)...');
     
     const stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
@@ -472,275 +496,201 @@ async function startVoiceChatFallback() {
         channelCount: 1,
         sampleRate: 16000
       } 
-    })
+    });
     
-    isVoiceModeActive = true
-    audioChunks = []
+    isVoiceModeActive = true;
+    audioChunks = [];
     
     mediaRecorder = new MediaRecorder(stream, {
       mimeType: 'audio/webm;codecs=opus'
-    })
+    });
     
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        audioChunks.push(event.data)
+        audioChunks.push(event.data);
       }
-    }
+    };
     
     mediaRecorder.onstop = async () => {
       if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
-        audioChunks = []
-        return
+        audioChunks = [];
+        return;
       }
       
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
-      audioChunks = []
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      audioChunks = [];
       
-      if (audioBlob.size < MIN_AUDIO_SIZE) {
-        console.log('[Voice] Audio too short, skipping');
-        voiceStatus.textContent = 'Listening... (speak clearly)'
-        if (isVoiceModeActive && !isAvatarSpeaking) {
-          setTimeout(() => startRecording(), 300)
-        }
-        return
-      }
-
-      isProcessingAudio = true
-      voiceStatus.textContent = 'Transcribing...'
-      updateHeyGenStatus('Transcribing with Whisper...')
+      await processUserSpeech(audioBlob);
       
-      try {
-        const audioFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' })
-        
-        console.log('[Voice] Sending audio to Whisper, size:', audioBlob.size)
-        const formData = new FormData()
-        formData.append('file', audioFile)
-        formData.append('model', 'whisper-1')
-        formData.append('language', 'en')
-        
-        const transcription = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
-          },
-          body: formData
-        })
-        
-        if (!transcription.ok) {
-          throw new Error(`Whisper API error: ${transcription.status}`)
-        }
-        
-        const result = await transcription.json()
-        const transcript = result.text
-        
-        console.log('[Voice] Whisper transcript:', transcript)
-        
-        if (!isValidTranscript(transcript)) {
-          voiceStatus.textContent = 'No clear speech - try again'
-          updateHeyGenStatus('Voice mode active - Speak now')
-          isProcessingAudio = false
-          
-          if (isVoiceModeActive && !isAvatarSpeaking) {
-            setTimeout(() => startRecording(), 500)
-          }
-          return
-        }
-        
-        voiceStatus.textContent = 'Getting AI response...'
-        updateHeyGenStatus('Processing...')
-        
-        const response = await openaiAssistant!.processWithBackend(transcript)
-        console.log('[Voice] AI response:', response)
-        
-        if (!avatar || !isVoiceModeActive) {
-          console.log('[Voice] Session ended, stopping voice mode')
-          isProcessingAudio = false
-          return
-        }
-        
-        voiceStatus.textContent = 'Avatar speaking...'
-        isAvatarSpeaking = true
-        await avatar.speak({
-          text: response,
-          taskType: TaskType.REPEAT
-        })
-        isAvatarSpeaking = false
-        
-        voiceStatus.textContent = 'Listening...'
-        updateHeyGenStatus('Voice mode active - Speak now')
-        isProcessingAudio = false
-        
-        if (isVoiceModeActive) {
-          setTimeout(() => startRecording(), 500)
-        }
-        
-      } catch (error) {
-        console.error('[Voice] Error processing audio:', error)
-        voiceStatus.textContent = 'Error - Try again'
-        updateHeyGenStatus('Voice error')
-        isProcessingAudio = false
-        isAvatarSpeaking = false
-        
-        if (isVoiceModeActive) {
-          setTimeout(() => startRecording(), 1000)
-        }
+      if (isVoiceModeActive && !isAvatarSpeaking && !isProcessingAudio) {
+        setTimeout(() => startFallbackRecording(), 500);
       }
-    }
+    };
     
-    voiceStatus.textContent = 'Listening...'
-    updateHeyGenStatus('Voice mode active - Speak now')
-    console.log('[Voice] Fallback voice mode started')
+    voiceStatus.textContent = 'Listening...';
+    updateHeyGenStatus('Voice mode active - Speak now');
+    console.log('[Voice] Fallback mode started');
     
-    startRecording()
+    startFallbackRecording();
     
   } catch (error) {
-    console.error('[Voice] Error starting fallback voice mode:', error)
+    console.error('[Voice] Fallback error:', error);
     
     if ((error as any).name === 'NotAllowedError') {
-      voiceStatus.textContent = 'Microphone access denied'
-      updateHeyGenStatus('Please allow microphone access')
-      alert('Microphone access is required for voice mode.')
+      voiceStatus.textContent = 'Microphone access denied';
+      updateHeyGenStatus('Please allow microphone access');
+      alert('Microphone access is required for voice mode.');
     } else {
-      voiceStatus.textContent = 'Error starting voice mode'
-      updateHeyGenStatus('Voice mode error')
+      voiceStatus.textContent = 'Error starting voice mode';
+      updateHeyGenStatus('Voice mode error');
     }
     
-    isVoiceModeActive = false
+    isVoiceModeActive = false;
   }
 }
 
-let recordingTimeout: number | null = null
+let recordingTimeout: number | null = null;
 
-function startRecording() {
-  if (!mediaRecorder || !isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) return
+function startFallbackRecording() {
+  if (!mediaRecorder || !isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) return;
   
   try {
-    audioChunks = []
-    isRecording = true
-    mediaRecorder.start()
+    audioChunks = [];
+    isRecording = true;
+    mediaRecorder.start();
     
-    voiceStatus.textContent = 'Listening... (speak now)'
-    stopSpeakingBtn.style.display = 'block'
-    console.log('[Voice] Recording started')
+    voiceStatus.textContent = 'Listening... (speak now)';
+    stopSpeakingBtn.style.display = 'block';
+    console.log('[Voice] Recording started');
     
     if (recordingTimeout) {
-      clearTimeout(recordingTimeout)
+      clearTimeout(recordingTimeout);
     }
 
     recordingTimeout = window.setTimeout(() => {
       if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
-        stopRecording()
+        stopFallbackRecording();
       }
-    }, 8000)
+    }, 8000);
     
   } catch (error) {
-    console.error('[Voice] Error starting recording:', error)
-    voiceStatus.textContent = 'Recording error'
+    console.error('[Voice] Recording error:', error);
+    voiceStatus.textContent = 'Recording error';
   }
 }
 
-function stopRecording() {
-  if (!mediaRecorder || !isRecording) return
+function stopFallbackRecording() {
+  if (!mediaRecorder || !isRecording) return;
   
   if (recordingTimeout) {
-    clearTimeout(recordingTimeout)
-    recordingTimeout = null
+    clearTimeout(recordingTimeout);
+    recordingTimeout = null;
   }
 
   try {
-    mediaRecorder.stop()
-    isRecording = false
-    stopSpeakingBtn.style.display = 'none'
-    console.log('[Voice] Recording stopped')
+    mediaRecorder.stop();
+    isRecording = false;
+    stopSpeakingBtn.style.display = 'none';
+    console.log('[Voice] Recording stopped');
   } catch (error) {
-    console.error('[Voice] Error stopping recording:', error)
+    console.error('[Voice] Error stopping:', error);
   }
 }
 
 async function switchMode(mode: 'text' | 'voice') {
-  if (currentMode === mode) return
+  if (currentMode === mode) return;
   
-  currentMode = mode
+  currentMode = mode;
   
   if (mode === 'text') {
-    textModeBtn.classList.add('active')
-    voiceModeBtn.classList.remove('active')
-    textModeControls.style.display = 'flex'
-    voiceModeControls.style.display = 'none'
+    textModeBtn.classList.add('active');
+    voiceModeBtn.classList.remove('active');
+    textModeControls.style.display = 'flex';
+    voiceModeControls.style.display = 'none';
     
-    isVoiceModeActive = false
-    isRecording = false
-    isProcessingAudio = false
+    isVoiceModeActive = false;
+    isRecording = false;
+    isProcessingAudio = false;
     
-    pauseVAD()
+    if (vadInitialized) {
+      pauseVAD();
+    }
     
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
-        mediaRecorder.stop()
-        mediaRecorder.stream.getTracks().forEach(track => track.stop())
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
       } catch (e) {
-        console.error('[Voice] Error stopping recorder:', e)
+        console.error('[Voice] Error stopping recorder:', e);
       }
     }
-    mediaRecorder = null
-    audioChunks = []
+    mediaRecorder = null;
+    audioChunks = [];
     
-    updateHeyGenStatus('Text mode active')
+    updateHeyGenStatus('Text mode active');
   } else {
-    textModeBtn.classList.remove('active')
-    voiceModeBtn.classList.add('active')
-    textModeControls.style.display = 'none'
-    voiceModeControls.style.display = 'block'
+    textModeBtn.classList.remove('active');
+    voiceModeBtn.classList.add('active');
+    textModeControls.style.display = 'none';
+    voiceModeControls.style.display = 'block';
     
     if (avatar) {
-      await startVoiceChat()
+      if (vadInitialized) {
+        isVoiceModeActive = true;
+        resumeVAD();
+        voiceStatus.textContent = 'Listening...';
+        updateHeyGenStatus('Voice mode active');
+      } else if (useFallbackRecording) {
+        await startVoiceChatFallback();
+      } else {
+        await startVoiceChatWithVAD();
+      }
     }
   }
 }
 
 async function stopAvatarSession() {
   try {
-    isVoiceModeActive = false
-    isRecording = false
-    isProcessingAudio = false
+    isVoiceModeActive = false;
+    isRecording = false;
+    isProcessingAudio = false;
     
-    destroyVAD()
-    vadInitialized = false
+    destroyVAD();
+    vadInitialized = false;
     
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
-        mediaRecorder.stop()
-        mediaRecorder.stream.getTracks().forEach(track => track.stop())
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
       } catch (e) {
-        console.error('[Voice] Error stopping recorder:', e)
+        console.error('[Voice] Error stopping recorder:', e);
       }
     }
-    mediaRecorder = null
-    audioChunks = []
+    mediaRecorder = null;
+    audioChunks = [];
     
     if (avatar) {
-      await avatar.stopAvatar()
-      heygenVideo.srcObject = null
+      await avatar.stopAvatar();
+      heygenVideo.srcObject = null;
     }
     
-    avatar = null
-    openaiAssistant = null
-    sessionData = null
+    avatar = null;
+    sessionData = null;
     
-    updateHeyGenStatus('Session ended')
-    heygenSessionInfo.textContent = ''
+    updateHeyGenStatus('Session ended');
+    heygenSessionInfo.textContent = '';
     
-    heygenStartBtn.disabled = false
-    heygenStopBtn.disabled = true
-    sendBtn.disabled = true
-    voiceModeBtn.disabled = true
+    heygenStartBtn.disabled = false;
+    heygenStopBtn.disabled = true;
+    sendBtn.disabled = true;
+    voiceModeBtn.disabled = true;
     
     if (currentMode === 'voice') {
-      switchMode('text')
+      switchMode('text');
     }
     
   } catch (error) {
-    console.error('[HeyGen] Error stopping session:', error)
+    console.error('[HeyGen] Error stopping session:', error);
   }
 }
 
@@ -769,14 +719,14 @@ async function createDIDTalk(text: string): Promise<string> {
   
   console.log('[D-ID] Creating talk with text:', text)
   
-    const response = await fetch('https://api.d-id.com/talks', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${btoa(DID_API_KEY)}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestData)
-    })
+  const response = await fetch('https://api.d-id.com/talks', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${btoa(DID_API_KEY)}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(requestData)
+  })
   
   if (!response.ok) {
     const errorText = await response.text()
@@ -795,12 +745,12 @@ async function pollDIDTalkStatus(talkId: string): Promise<void> {
   didSessionInfo.textContent = `Talk ID: ${talkId}`
   
   const checkStatus = async () => {
-      try {
-        const response = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-          headers: {
-            'Authorization': `Basic ${btoa(DID_API_KEY)}`
-          }
-        })
+    try {
+      const response = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+        headers: {
+          'Authorization': `Basic ${btoa(DID_API_KEY)}`
+        }
+      })
       
       if (!response.ok) {
         throw new Error('Failed to check talk status')
@@ -887,6 +837,21 @@ chatInput.addEventListener('keypress', (e) => {
   }
 })
 
-stopSpeakingBtn.addEventListener('click', stopRecording)
+stopSpeakingBtn.addEventListener('click', () => {
+  if (vadInitialized) {
+    pauseVAD();
+    isRecording = false;
+    stopSpeakingBtn.style.display = 'none';
+  } else {
+    stopFallbackRecording();
+  }
+})
 
 didStartBtn.addEventListener('click', startDIDVideo)
+
+window.addEventListener('beforeunload', () => {
+  destroyVAD();
+  if (avatar) {
+    avatar.stopAvatar();
+  }
+});
