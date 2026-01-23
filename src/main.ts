@@ -6,7 +6,6 @@ import StreamingAvatar, {
 } from '@heygen/streaming-avatar'
 import { OpenAIAssistant } from './openai-assistant'
 
-// API Configuration
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
 const DID_API_KEY = import.meta.env.VITE_DID_API_KEY || '';
@@ -17,7 +16,6 @@ interface DIDTalkResponse {
   status: string;
 }
 
-// App HTML
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <h1>AI Avatar Assistant</h1>
@@ -92,14 +90,12 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   </div>
 `
 
-// State
 let avatar: StreamingAvatar | null = null
 let openaiAssistant: OpenAIAssistant | null = null
 let sessionData: any = null
 let currentMode: 'text' | 'voice' = 'text'
 let didPollingInterval: number | null = null
 
-// UI Elements
 const heygenTab = document.querySelector<HTMLButtonElement>('#heygenTab')!
 const didTab = document.querySelector<HTMLButtonElement>('#didTab')!
 
@@ -129,7 +125,6 @@ const didTextInput = document.querySelector<HTMLInputElement>('#didTextInput')!
 const didStatus = document.querySelector<HTMLParagraphElement>('#didStatus')!
 const didSessionInfo = document.querySelector<HTMLParagraphElement>('#didSessionInfo')!
 
-// View Management
 function switchView(view: 'heygen' | 'did') {
   heygenTab.classList.remove('active')
   didTab.classList.remove('active')
@@ -145,7 +140,6 @@ function switchView(view: 'heygen' | 'did') {
   }
 }
 
-// HeyGen Functions
 function updateHeyGenStatus(message: string) {
   console.log('[HeyGen]', message)
   heygenStatus.textContent = message
@@ -181,7 +175,6 @@ async function initializeAvatarSession() {
     const token = await fetchAccessToken()
     avatar = new StreamingAvatar({ token })
 
-    // Initialize OpenAI Assistant
     if (OPENAI_API_KEY) {
       updateHeyGenStatus('Initializing AI assistant...')
       openaiAssistant = new OpenAIAssistant(OPENAI_API_KEY)
@@ -189,11 +182,9 @@ async function initializeAvatarSession() {
       console.log('[HeyGen] OpenAI Assistant initialized')
     }
 
-    // Set up event listeners
     avatar.on(StreamingEvents.STREAM_READY, handleStreamReady)
     avatar.on(StreamingEvents.STREAM_DISCONNECTED, handleStreamDisconnected)
     
-    // Voice chat event listeners
     avatar.on(StreamingEvents.USER_START, () => {
       voiceStatus.textContent = 'Listening...'
     })
@@ -202,9 +193,11 @@ async function initializeAvatarSession() {
     })
     avatar.on(StreamingEvents.AVATAR_START_TALKING, () => {
       voiceStatus.textContent = 'Avatar is speaking...'
+      isAvatarSpeaking = true
     })
     avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
       voiceStatus.textContent = 'Waiting for you to speak...'
+      isAvatarSpeaking = false
     })
 
     updateHeyGenStatus('Starting avatar...')
@@ -258,7 +251,7 @@ async function handleSpeak() {
     
     try {
       updateHeyGenStatus('Getting AI response...')
-      const response = await openaiAssistant.getResponse(userMessage)
+      const response = await openaiAssistant.processWithBackend(userMessage)
       console.log('[HeyGen] OpenAI response:', response)
       
       updateHeyGenStatus('Avatar speaking...')
@@ -283,27 +276,71 @@ let mediaRecorder: MediaRecorder | null = null
 let audioChunks: Blob[] = []
 let isVoiceModeActive = false
 let isRecording = false
+let isAvatarSpeaking = false
+let isProcessingAudio = false
+
+const MIN_AUDIO_SIZE = 5000;
+const MIN_TRANSCRIPT_LENGTH = 2;
+
+const SPAM_PATTERNS = [
+  /📢|🔔|👍|👉|💯|✨/,
+  /share.*video.*social media/i,
+  /subscribe.*channel/i,
+  /like.*comment.*subscribe/i,
+  /click.*link/i,
+  /thank.*watching/i,
+  /^[^a-zA-Z0-9]+$/,
+  /^\s*$/,
+  /^(um|uh|hmm|ah|oh)+\s*$/i,
+  /^\.+$/,
+  /^\[.*\]$/,
+];
+
+function isValidTranscript(transcript: string): boolean {
+  if (!transcript || transcript.trim().length < MIN_TRANSCRIPT_LENGTH) {
+    return false;
+  }
+
+  const trimmed = transcript.trim();
+  
+  for (const pattern of SPAM_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      console.log('[Voice] Filtered spam/noise:', trimmed);
+      return false;
+    }
+  }
+
+  const alphanumericCount = (trimmed.match(/[a-zA-Z0-9]/g) || []).length;
+  if (alphanumericCount < 2) {
+    console.log('[Voice] Not enough alphanumeric characters:', trimmed);
+    return false;
+  }
+
+  return true;
+}
 
 async function startVoiceChat() {
   if (!avatar || !openaiAssistant) return
   
   try {
-    updateHeyGenStatus('Starting voice mode with OpenAI Whisper...')
+    updateHeyGenStatus('Starting voice mode...')
     
-    // Request microphone access
     const stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 16000
       } 
     })
     
     isVoiceModeActive = true
     audioChunks = []
     
-    // Create MediaRecorder to capture audio
-    mediaRecorder = new MediaRecorder(stream)
+    mediaRecorder = new MediaRecorder(stream, {
+      mimeType: 'audio/webm;codecs=opus'
+    })
     
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
@@ -312,24 +349,35 @@ async function startVoiceChat() {
     }
     
     mediaRecorder.onstop = async () => {
-      if (!isVoiceModeActive) return
+      if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
+        audioChunks = []
+        return
+      }
       
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
+      audioChunks = []
+      
+      if (audioBlob.size < MIN_AUDIO_SIZE) {
+        console.log('[Voice] Audio too short, skipping');
+        voiceStatus.textContent = 'Listening... (speak clearly)'
+        if (isVoiceModeActive && !isAvatarSpeaking) {
+          setTimeout(() => startRecording(), 300)
+        }
+        return
+      }
+
+      isProcessingAudio = true
       voiceStatus.textContent = 'Transcribing...'
       updateHeyGenStatus('Transcribing with Whisper...')
       
       try {
-        // Create audio blob
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' })
-        audioChunks = []
-        
-        // Convert to File object for Whisper API
         const audioFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' })
         
-        // Transcribe with Whisper
-        console.log('[Voice] Sending audio to Whisper...')
+        console.log('[Voice] Sending audio to Whisper, size:', audioBlob.size)
         const formData = new FormData()
         formData.append('file', audioFile)
         formData.append('model', 'whisper-1')
+        formData.append('language', 'en')
         
         const transcription = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -348,77 +396,52 @@ async function startVoiceChat() {
         
         console.log('[Voice] Whisper transcript:', transcript)
         
-        // Filter out invalid/spam transcripts
-        if (!transcript || transcript.trim().length === 0) {
-          voiceStatus.textContent = 'No speech detected - Speak again'
+        if (!isValidTranscript(transcript)) {
+          voiceStatus.textContent = 'No clear speech - try again'
           updateHeyGenStatus('Voice mode active - Speak now')
+          isProcessingAudio = false
           
-          // Restart recording
-          if (isVoiceModeActive) {
+          if (isVoiceModeActive && !isAvatarSpeaking) {
             setTimeout(() => startRecording(), 500)
           }
           return
         }
         
-        // Check for spam/background audio patterns
-        const spamPatterns = [
-          /📢|🔔|👍|👉|💯|✨/, // Emojis (common in video ads)
-          /share.*video.*social media/i,
-          /subscribe.*channel/i,
-          /like.*comment.*subscribe/i,
-          /click.*link/i,
-          /thank.*watching/i,
-          /^[^a-zA-Z0-9]+$/, // Only special characters
-        ]
-        
-        const isSpam = spamPatterns.some(pattern => pattern.test(transcript))
-        
-        if (isSpam) {
-          console.log('[Voice] Filtered out spam/background audio:', transcript)
-          voiceStatus.textContent = 'Background noise detected - Speak clearly'
-          updateHeyGenStatus('Voice mode active - Speak now')
-          
-          // Restart recording
-          if (isVoiceModeActive) {
-            setTimeout(() => startRecording(), 500)
-          }
-          return
-        }
-        
-        // Get AI response
         voiceStatus.textContent = 'Getting AI response...'
-        updateHeyGenStatus('Processing with GPT-4o...')
+        updateHeyGenStatus('Processing...')
         
-        const response = await openaiAssistant.getResponse(transcript)
-        console.log('[Voice] OpenAI response:', response)
+        const response = await openaiAssistant!.processWithBackend(transcript)
+        console.log('[Voice] AI response:', response)
         
-        // Check if avatar is still available
         if (!avatar || !isVoiceModeActive) {
           console.log('[Voice] Session ended, stopping voice mode')
+          isProcessingAudio = false
           return
         }
         
-        // Avatar speaks
         voiceStatus.textContent = 'Avatar speaking...'
+        isAvatarSpeaking = true
         await avatar.speak({
           text: response,
           taskType: TaskType.REPEAT
         })
+        isAvatarSpeaking = false
         
         voiceStatus.textContent = 'Listening...'
         updateHeyGenStatus('Voice mode active - Speak now')
+        isProcessingAudio = false
         
-        // Restart recording for next question
         if (isVoiceModeActive) {
-          setTimeout(() => startRecording(), 1000)
+          setTimeout(() => startRecording(), 500)
         }
         
       } catch (error) {
         console.error('[Voice] Error processing audio:', error)
-        voiceStatus.textContent = 'Error processing audio'
-        updateHeyGenStatus('Voice error - Try again')
+        voiceStatus.textContent = 'Error - Try again'
+        updateHeyGenStatus('Voice error')
+        isProcessingAudio = false
+        isAvatarSpeaking = false
         
-        // Restart recording
         if (isVoiceModeActive) {
           setTimeout(() => startRecording(), 1000)
         }
@@ -426,10 +449,9 @@ async function startVoiceChat() {
     }
     
     voiceStatus.textContent = 'Listening...'
-    updateHeyGenStatus('Voice mode active with Whisper - Speak now')
-    console.log('[Voice] Whisper voice mode started')
+    updateHeyGenStatus('Voice mode active - Speak now')
+    console.log('[Voice] Voice mode started')
     
-    // Start first recording
     startRecording()
     
   } catch (error) {
@@ -438,7 +460,7 @@ async function startVoiceChat() {
     if ((error as any).name === 'NotAllowedError') {
       voiceStatus.textContent = 'Microphone access denied'
       updateHeyGenStatus('Please allow microphone access')
-      alert('Microphone access is required for voice mode. Please allow microphone permissions in your browser and try again.')
+      alert('Microphone access is required for voice mode.')
     } else {
       voiceStatus.textContent = 'Error starting voice mode'
       updateHeyGenStatus('Voice mode error')
@@ -451,7 +473,7 @@ async function startVoiceChat() {
 let recordingTimeout: number | null = null
 
 function startRecording() {
-  if (!mediaRecorder || !isVoiceModeActive) return
+  if (!mediaRecorder || !isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) return
   
   try {
     audioChunks = []
@@ -462,17 +484,15 @@ function startRecording() {
     stopSpeakingBtn.style.display = 'block'
     console.log('[Voice] Recording started')
     
-    // Clear existing timeout if any
     if (recordingTimeout) {
       clearTimeout(recordingTimeout)
     }
 
-    // Stop recording after 10 seconds (or when user clicks button)
     recordingTimeout = window.setTimeout(() => {
       if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
         stopRecording()
       }
-    }, 10000) // 10 second max recording
+    }, 8000)
     
   } catch (error) {
     console.error('[Voice] Error starting recording:', error)
@@ -492,7 +512,7 @@ function stopRecording() {
     mediaRecorder.stop()
     isRecording = false
     stopSpeakingBtn.style.display = 'none'
-    console.log('[Voice] Recording stopped by user')
+    console.log('[Voice] Recording stopped')
   } catch (error) {
     console.error('[Voice] Error stopping recording:', error)
   }
@@ -509,9 +529,9 @@ async function switchMode(mode: 'text' | 'voice') {
     textModeControls.style.display = 'flex'
     voiceModeControls.style.display = 'none'
     
-    // Stop voice recording if active
     isVoiceModeActive = false
     isRecording = false
+    isProcessingAudio = false
     
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
@@ -539,9 +559,9 @@ async function switchMode(mode: 'text' | 'voice') {
 
 async function stopAvatarSession() {
   try {
-    // Stop voice recording if active
     isVoiceModeActive = false
     isRecording = false
+    isProcessingAudio = false
     
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
@@ -571,7 +591,6 @@ async function stopAvatarSession() {
     sendBtn.disabled = true
     voiceModeBtn.disabled = true
     
-    // Reset to text mode
     if (currentMode === 'voice') {
       switchMode('text')
     }
@@ -581,7 +600,6 @@ async function stopAvatarSession() {
   }
 }
 
-// D-ID Functions
 function updateDIDStatus(message: string) {
   console.log('[D-ID]', message)
   didStatus.textContent = message
@@ -709,7 +727,6 @@ async function startDIDVideo() {
   }
 }
 
-// Event Handlers
 heygenTab.addEventListener('click', () => switchView('heygen'))
 didTab.addEventListener('click', () => switchView('did'))
 
