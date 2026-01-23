@@ -1,9 +1,8 @@
 import OpenAI from "openai";
 import { classifyQuery } from './utils/queryClassifier';
-import { cleanResponseForAvatar } from './utils/responseSanitizer';
-import { getInstantResponse } from './utils/commonResponses';
+import { prepareForVoice } from './utils/responseSanitizer';
 import { getCachedResponse, setCachedResponse } from './utils/responseCache';
-import { DIRECT_RESPONSE_PROMPT, ASSISTANT_INSTRUCTIONS } from './config/prompts';
+import { DIRECT_RESPONSE_PROMPT } from './config/prompts';
 
 export class OpenAIAssistant {
   private client: OpenAI;
@@ -16,12 +15,10 @@ export class OpenAIAssistant {
     this.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  async initialize(
-    instructions: string = ASSISTANT_INSTRUCTIONS
-  ) {
+  async initialize() {
     this.assistant = await this.client.beta.assistants.create({
       name: "HeyGen Avatar Assistant",
-      instructions,
+      instructions: DIRECT_RESPONSE_PROMPT,
       tools: [],
       model: "gpt-4o",
     });
@@ -112,24 +109,23 @@ export class OpenAIAssistant {
     const startTime = Date.now();
     console.log('[Assistant] Processing:', userMessage);
 
-    const instantResponse = getInstantResponse(userMessage);
-    if (instantResponse) {
-      console.log('[Assistant] Using instant response');
-      return instantResponse;
-    }
-
     const cached = getCachedResponse(userMessage);
     if (cached) {
       console.log('[Assistant] Using cached response');
       return cached.response;
     }
 
-    const queryType = await classifyQuery(userMessage, this.client);
-    console.log('[Assistant] Query type:', queryType);
+    const classification = await classifyQuery(userMessage, this.client);
+    console.log('[Assistant] Query type:', classification.type);
+
+    if (classification.type === 'instant' && classification.instantResponse) {
+      console.log('[Assistant] Using instant response');
+      return classification.instantResponse;
+    }
 
     let rawResponse: string;
 
-    if (queryType === 'web_search') {
+    if (classification.type === 'web_search') {
       try {
         rawResponse = await this.getResponseWithWebSearch(userMessage);
       } catch (error) {
@@ -145,9 +141,9 @@ export class OpenAIAssistant {
       }
     }
 
-    const cleanResponse = cleanResponseForAvatar(rawResponse);
+    const cleanResponse = prepareForVoice(rawResponse);
 
-    setCachedResponse(userMessage, cleanResponse, queryType);
+    setCachedResponse(userMessage, cleanResponse, classification.type);
 
     const processingTime = Date.now() - startTime;
     console.log(`[Assistant] Response (${processingTime}ms):`, cleanResponse.substring(0, 80) + '...');
