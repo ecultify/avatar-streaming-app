@@ -1,20 +1,20 @@
-import { MicVAD } from "@ricky0123/vad-web";
-
 export interface VADCallbacks {
   onSpeechStart: () => void;
   onSpeechEnd: (audioBlob: Blob) => void;
   onVADMisfire?: () => void;
 }
 
-let vadInstance: MicVAD | null = null;
+let vadInstance: any = null;
 
 const ONNX_RUNTIME_VERSION = "1.22.0";
 const VAD_VERSION = "0.0.29";
 
-export async function initializeVAD(callbacks: VADCallbacks): Promise<MicVAD> {
+export async function initializeVAD(callbacks: VADCallbacks): Promise<any> {
   console.log("[VAD] Initializing with CDN...");
   
   try {
+    const { MicVAD } = await import("@ricky0123/vad-web");
+    
     vadInstance = await MicVAD.new({
       onnxWASMBasePath: `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_RUNTIME_VERSION}/dist/`,
       baseAssetPath: `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${VAD_VERSION}/dist/`,
