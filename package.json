@@ -3,12 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=18.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "backend": "node server.js",
-    "start": "concurrently \"npm run backend\" \"npm run dev\""
+    "start": "node server.js"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

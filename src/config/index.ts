@@ -21,7 +21,7 @@ export const VAD_CONFIG = {
 };
 
 export const API_CONFIG = {
-  BACKEND_URL: "http://localhost:3001",
+  BACKEND_URL: "",
   MAX_RESPONSE_SENTENCES: 3,
   CACHE_TTL_DIRECT: 5 * 60 * 1000,
   CACHE_TTL_SEARCH: 30 * 1000,
