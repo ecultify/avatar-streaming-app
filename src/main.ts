@@ -214,12 +214,16 @@ async function initializeAvatarSession() {
       isAvatarSpeaking = true
     })
     avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
-      voiceStatus.textContent = 'Waiting for you to speak...'
-      isAvatarSpeaking = false
-      if (isVoiceModeActive && vadInitialized) {
-        resumeVAD()
-      }
-    })
+        console.log('[HeyGen] Avatar stopped talking')
+        voiceStatus.textContent = 'Listening...'
+        isAvatarSpeaking = false
+        if (isVoiceModeActive) {
+          updateHeyGenStatus('Voice mode active - Speak now')
+          if (vadInitialized) {
+            resumeVAD()
+          }
+        }
+      })
 
     updateHeyGenStatus('Starting avatar...')
     sessionData = await avatar.createStartAvatar({
@@ -249,14 +253,31 @@ function handleStreamReady(event: any) {
   console.log('[HeyGen] Stream ready:', event)
   
   if (event.detail && heygenVideo) {
-    heygenVideo.srcObject = event.detail
-    heygenVideo.onloadedmetadata = () => {
-      heygenVideo.play().catch(console.error)
-      updateHeyGenStatus('Connected - Ready to chat!')
-      sendBtn.disabled = false
-      voiceModeBtn.disabled = false
+      heygenVideo.srcObject = event.detail
+      heygenVideo.muted = false
+      heygenVideo.volume = 1.0
+      heygenVideo.onloadedmetadata = () => {
+        heygenVideo.play().then(() => {
+          console.log('[HeyGen] Video playing with audio')
+          updateHeyGenStatus('Connected - Ready to chat!')
+          sendBtn.disabled = false
+          voiceModeBtn.disabled = false
+        }).catch((err) => {
+          console.error('[HeyGen] Video play failed:', err)
+          heygenVideo.muted = true
+          heygenVideo.play().then(() => {
+            console.log('[HeyGen] Playing muted, click to unmute')
+            updateHeyGenStatus('Connected - Click video to enable audio')
+            heygenVideo.onclick = () => {
+              heygenVideo.muted = false
+              console.log('[HeyGen] Audio unmuted')
+            }
+          }).catch(console.error)
+          sendBtn.disabled = false
+          voiceModeBtn.disabled = false
+        })
+      }
     }
-  }
 }
 
 function handleStreamDisconnected() {
@@ -404,24 +425,17 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
       return;
     }
     
-    voiceStatus.textContent = 'Avatar speaking...';
-    isAvatarSpeaking = true;
-    
-    await avatar.speak({
-      text: response,
-      taskType: TaskType.REPEAT
-    });
-    
-    isAvatarSpeaking = false;
-    voiceStatus.textContent = 'Listening...';
-    updateHeyGenStatus('Voice mode active - Speak now');
-    isProcessingAudio = false;
-    
-    if (isVoiceModeActive && vadInitialized) {
-      resumeVAD();
-    }
-    
-  } catch (error) {
+      voiceStatus.textContent = 'Avatar speaking...';
+      isAvatarSpeaking = true;
+      
+      await avatar.speak({
+        text: response,
+        taskType: TaskType.REPEAT
+      });
+      
+      isProcessingAudio = false;
+      
+    } catch (error) {
     console.error('[Voice] Error:', error);
     voiceStatus.textContent = 'Error - Try again';
     updateHeyGenStatus('Voice error');

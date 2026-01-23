@@ -35,11 +35,11 @@ export async function initializeVAD(callbacks: VADCallbacks): Promise<any> {
         callbacks.onVADMisfire?.();
       },
       
-      positiveSpeechThreshold: 0.85,
-      negativeSpeechThreshold: 0.35,
-      minSpeechMs: 250,
-      preSpeechPadMs: 500,
-      redemptionMs: 300,
+        positiveSpeechThreshold: 0.8,
+        negativeSpeechThreshold: 0.3,
+        minSpeechMs: 300,
+        preSpeechPadMs: 600,
+        redemptionMs: 800,
     });
     
     console.log("[VAD] Initialized successfully!");
