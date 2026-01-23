@@ -488,15 +488,28 @@ async function startVoiceChatFallback() {
   try {
     updateHeyGenStatus('Starting voice mode (fallback)...');
     
-    const stream = await navigator.mediaDevices.getUserMedia({ 
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        sampleRate: 16000
-      } 
-    });
+    let stream;
+
+    try {
+      console.log('[Voice] Requesting mic with strict constraints...');
+      stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 16000
+        } 
+      });
+    } catch (e) {
+      console.warn('[Voice] Strict config failed, retrying with defaults...', e);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        console.log('[Voice] Acquired mic with default config');
+      } catch (err) {
+        throw err; // Throw original error if both fail
+      }
+    }
     
     isVoiceModeActive = true;
     audioChunks = [];
