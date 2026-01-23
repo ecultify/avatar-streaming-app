@@ -350,7 +350,16 @@ async function transcribeAudio(audioBlob: Blob): Promise<string> {
   });
 
   if (!response.ok) {
-    throw new Error(`Transcription API error: ${response.status}`);
+    let errorDetails = '';
+    try {
+      const errorData = await response.json();
+      errorDetails = JSON.stringify(errorData);
+      console.error('[Transcribe] Server Error Details:', errorData);
+    } catch (e) {
+      errorDetails = await response.text();
+      console.error('[Transcribe] Server Error Text:', errorDetails);
+    }
+    throw new Error(`Transcription API error: ${response.status} ${errorDetails}`);
   }
 
   const data = await response.json();
