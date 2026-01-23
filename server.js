@@ -238,8 +238,17 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     console.log('[Transcribe] Processing file at:', req.file.path);
 
+    // OpenAI requires a file extension to determine the format. 
+    // Multer saves as a random string without extension, so we must rename it.
+    const originalName = req.file.originalname;
+    const extension = path.extname(originalName) || '.wav'; // Default to .wav if missing
+    const newPath = req.file.path + extension;
+
+    fs.renameSync(req.file.path, newPath);
+    req.file.path = newPath; // Update path for cleanup later
+
     const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(req.file.path),
+      file: fs.createReadStream(newPath),
       model: "whisper-1",
     });
 
