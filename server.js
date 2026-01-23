@@ -358,17 +358,24 @@ app.post('/api/clear-session', (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  const indexPath = path.join(__dirname, 'dist', 'app.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
+    // Fallback to index.html just in case, then error
+    const fallbackPath = path.join(__dirname, 'dist', 'index.html');
+    if (fs.existsSync(fallbackPath)) {
+      res.sendFile(fallbackPath);
+      return;
+    }
+
     res.status(503).send(`
       <html>
         <head><title>Building...</title></head>
         <body style="font-family: sans-serif; padding: 2rem; text-align: center;">
           <h1>App is building...</h1>
           <p>The frontend assets are being generated. Please reload in a minute.</p>
-          <p>If this persists, the build failed.</p>
+          <p>If this persists, the build failed. (Checked for dist/app.html)</p>
         </body>
       </html>
     `);
@@ -388,8 +395,13 @@ app.listen(PORT, () => {
 ╚════════════════════════════════════════════════════════════╝
   `);
 
-  console.warn('  Set OPENAI_API_KEY environment variable to fix this.\n');
-}
+  if (OPENAI_API_KEY) {
+    console.log('✅ OpenAI API key detected\n');
+  } else {
+    console.warn('⚠️ WARNING: No OpenAI API key found');
+    console.warn('  The backend will start, but AI features will fail until the key is set.');
+    console.warn('  Set OPENAI_API_KEY environment variable to fix this.\n');
+  }
 });
 
 export default app;
