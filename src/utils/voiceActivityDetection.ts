@@ -1,5 +1,4 @@
 import { MicVAD } from "@ricky0123/vad-web";
-import { VAD_CONFIG } from '../config';
 
 export interface VADCallbacks {
   onSpeechStart: () => void;
@@ -9,37 +8,41 @@ export interface VADCallbacks {
 
 let vadInstance: MicVAD | null = null;
 
+const ONNX_RUNTIME_VERSION = "1.22.0";
+const VAD_VERSION = "0.0.29";
+
 export async function initializeVAD(callbacks: VADCallbacks): Promise<MicVAD> {
+  console.log("[VAD] Initializing with CDN...");
+  
   try {
-    const vadOptions: any = {
+    vadInstance = await MicVAD.new({
+      onnxWASMBasePath: `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_RUNTIME_VERSION}/dist/`,
+      baseAssetPath: `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${VAD_VERSION}/dist/`,
+      
       onSpeechStart: () => {
         console.log("[VAD] Speech detected - listening...");
         callbacks.onSpeechStart();
       },
+      
       onSpeechEnd: (audio: Float32Array) => {
-        console.log("[VAD] Speech ended - processing...");
+        console.log("[VAD] Speech ended - processing audio...");
         const wavBlob = float32ArrayToWav(audio, 16000);
         callbacks.onSpeechEnd(wavBlob);
       },
+      
       onVADMisfire: () => {
         console.log("[VAD] Noise filtered (misfire)");
         callbacks.onVADMisfire?.();
       },
-      positiveSpeechThreshold: VAD_CONFIG.POSITIVE_SPEECH_THRESHOLD,
-      negativeSpeechThreshold: VAD_CONFIG.NEGATIVE_SPEECH_THRESHOLD,
-      minSpeechFrames: VAD_CONFIG.MIN_SPEECH_FRAMES,
-      preSpeechPadFrames: VAD_CONFIG.PRE_SPEECH_PAD_FRAMES,
-      redemptionFrames: VAD_CONFIG.REDEMPTION_FRAMES,
-    };
+      
+      positiveSpeechThreshold: 0.85,
+      negativeSpeechThreshold: 0.35,
+      minSpeechMs: 250,
+      preSpeechPadMs: 500,
+      redemptionMs: 300,
+    });
     
-    if (VAD_CONFIG.USE_CDN) {
-      const cdnBase = `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@${VAD_CONFIG.CDN_VERSION}/dist`;
-      vadOptions.modelURL = `${cdnBase}/silero_vad_legacy.onnx`;
-      vadOptions.workletURL = `${cdnBase}/vad.worklet.bundle.min.js`;
-    }
-    
-    vadInstance = await MicVAD.new(vadOptions);
-    console.log("[VAD] Initialized successfully");
+    console.log("[VAD] Initialized successfully!");
     return vadInstance;
     
   } catch (error) {
@@ -52,6 +55,8 @@ export function startVAD(): void {
   if (vadInstance) {
     vadInstance.start();
     console.log("[VAD] Started listening");
+  } else {
+    console.warn("[VAD] Cannot start - not initialized");
   }
 }
 
@@ -71,7 +76,7 @@ export function resumeVAD(): void {
 
 export function destroyVAD(): void {
   if (vadInstance) {
-    vadInstance.destroy();
+    vadInstance.pause();
     vadInstance = null;
     console.log("[VAD] Destroyed");
   }

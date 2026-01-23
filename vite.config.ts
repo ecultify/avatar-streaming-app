@@ -8,6 +8,9 @@ export default defineConfig({
     exclude: ['@ricky0123/vad-web']
   },
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    rollupOptions: {
+      external: ['onnxruntime-web']
+    }
   }
 });
