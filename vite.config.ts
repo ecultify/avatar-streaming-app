@@ -5,12 +5,9 @@ export default defineConfig({
     port: 5173,
   },
   optimizeDeps: {
-    exclude: ['@ricky0123/vad-web']
+    include: ['onnxruntime-web'],
   },
   build: {
     target: 'esnext',
-    rollupOptions: {
-      external: ['onnxruntime-web']
-    }
   }
 });

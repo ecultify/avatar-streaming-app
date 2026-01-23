@@ -511,21 +511,24 @@ async function startVoiceChatFallback() {
       }
     };
     
-    mediaRecorder.onstop = async () => {
-      if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
+      mediaRecorder.onstop = async () => {
+        if (!isVoiceModeActive || isAvatarSpeaking) {
+          audioChunks = [];
+          if (isVoiceModeActive && !isAvatarSpeaking) {
+            setTimeout(() => startFallbackRecording(), 500);
+          }
+          return;
+        }
+        
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         audioChunks = [];
-        return;
-      }
-      
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-      audioChunks = [];
-      
-      await processUserSpeech(audioBlob);
-      
-      if (isVoiceModeActive && !isAvatarSpeaking && !isProcessingAudio) {
-        setTimeout(() => startFallbackRecording(), 500);
-      }
-    };
+        
+        await processUserSpeech(audioBlob);
+        
+        if (isVoiceModeActive && !isAvatarSpeaking) {
+          setTimeout(() => startFallbackRecording(), 500);
+        }
+      };
     
     voiceStatus.textContent = 'Listening...';
     updateHeyGenStatus('Voice mode active - Speak now');
