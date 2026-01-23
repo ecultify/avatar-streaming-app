@@ -167,9 +167,9 @@ The assistant will automatically:
 Create a `.env` file with all three API keys:
 
 ```env
-VITE_HEYGEN_API_KEY=sk_V2_hgu_kzkIuRnJ9fM_Bkmm3YAmpLjbgGK0ZgbP7SR6qV5Ozuvd
+VITE_HEYGEN_API_KEY=your_heygen_api_key_here
 VITE_OPENAI_API_KEY=your_openai_api_key_here
-VITE_DID_API_KEY=OThhYnJhaUBnbWFpbC5jb20:TbLnfFLM99hZNABGLS6T2
+VITE_DID_API_KEY=your_did_api_key_here
 ```
 
 ## API Integration Details
