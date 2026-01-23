@@ -10,9 +10,18 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import fs from 'fs';
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Check if dist folder exists
+const distPath = path.join(__dirname, 'dist');
+if (!fs.existsSync(distPath)) {
+  console.warn('⚠️ WARNING: dist/ directory not found. The frontend will not be served.');
+  console.warn('Run "npm run build" to generate the frontend assets.');
+}
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -369,7 +378,8 @@ app.listen(PORT, () => {
   if (OPENAI_API_KEY) {
     console.log('✅ OpenAI API key detected\n');
   } else {
-    console.log('❌ ERROR: No OpenAI API key found\n');
-    process.exit(1);
+    console.warn('⚠️ WARNING: No OpenAI API key found');
+    console.warn('  The backend will start, but AI features will fail until the key is set.');
+    console.warn('  Set OPENAI_API_KEY environment variable to fix this.\n');
   }
 });
