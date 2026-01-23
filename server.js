@@ -388,11 +388,8 @@ app.listen(PORT, () => {
 ╚════════════════════════════════════════════════════════════╝
   `);
 
-  if (OPENAI_API_KEY) {
-    console.log('✅ OpenAI API key detected\n');
-  } else {
-    console.warn('⚠️ WARNING: No OpenAI API key found');
-    console.warn('  The backend will start, but AI features will fail until the key is set.');
-    console.warn('  Set OPENAI_API_KEY environment variable to fix this.\n');
-  }
+  console.warn('  Set OPENAI_API_KEY environment variable to fix this.\n');
+}
 });
+
+export default app;
