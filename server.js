@@ -114,7 +114,7 @@ function getInstantResponse(query) {
 
 function sanitizeForVoice(text) {
   if (!text) return '';
-  
+
   return text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/https?:\/\/[^\s\])},"]+/gi, '')
@@ -166,7 +166,7 @@ const INSTANT_PATTERNS = [
 
 async function classifyQuery(transcript) {
   const trimmed = transcript.trim();
-  
+
   for (const pattern of INSTANT_PATTERNS) {
     if (pattern.test(trimmed)) {
       const instant = getInstantResponse(trimmed);
@@ -174,13 +174,13 @@ async function classifyQuery(transcript) {
       return { type: 'direct' };
     }
   }
-  
+
   for (const pattern of WEB_SEARCH_PATTERNS) {
     if (pattern.test(trimmed)) {
       return { type: 'web_search' };
     }
   }
-  
+
   try {
     const response = await openai.chat.completions.create({
       model: MODELS.CLASSIFIER,
@@ -191,7 +191,7 @@ async function classifyQuery(transcript) {
       max_tokens: 10,
       temperature: 0
     });
-    
+
     const result = response.choices[0].message.content?.toLowerCase().trim();
     return { type: result === 'web_search' ? 'web_search' : 'direct' };
   } catch (error) {
@@ -204,7 +204,7 @@ function extractTextFromResponse(response) {
   if (response.output_text) {
     return response.output_text;
   }
-  
+
   if (response.output && Array.isArray(response.output)) {
     for (const item of response.output) {
       if (item.type === 'message' && item.content) {
@@ -216,11 +216,11 @@ function extractTextFromResponse(response) {
       }
     }
   }
-  
+
   if (response.choices?.[0]?.message?.content) {
     return response.choices[0].message.content;
   }
-  
+
   return "I couldn't process that. Could you try again?";
 }
 
@@ -228,23 +228,23 @@ const sessionConversations = new Map();
 
 app.post('/api/process-query', async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const { transcript, sessionId = 'default' } = req.body;
-    
+
     if (!transcript?.trim()) {
       return res.status(400).json({ error: 'Empty transcript' });
     }
-    
+
     console.log(`[${sessionId}] Processing: "${transcript}"`);
-    
+
     const classification = await classifyQuery(transcript);
     console.log(`[${sessionId}] Classification: ${classification.type}`);
-    
+
     if (classification.type === 'instant' && classification.instantResponse) {
       const processingTime = Date.now() - startTime;
       console.log(`[${sessionId}] Instant response (${processingTime}ms)`);
-      
+
       return res.json({
         response: classification.instantResponse,
         queryType: 'instant',
@@ -253,10 +253,10 @@ app.post('/api/process-query', async (req, res) => {
         cached: false
       });
     }
-    
+
     let rawResponse;
     let conversationId = sessionConversations.get(sessionId);
-    
+
     if (classification.type === 'web_search') {
       try {
         const searchResponse = await openai.responses.create({
@@ -265,7 +265,7 @@ app.post('/api/process-query', async (req, res) => {
           tools: [{ type: "web_search" }],
           instructions: WEB_SEARCH_PROMPT,
         });
-        
+
         rawResponse = extractTextFromResponse(searchResponse);
       } catch (error) {
         console.error('[WebSearch] Responses API failed:', error.message);
@@ -279,29 +279,29 @@ app.post('/api/process-query', async (req, res) => {
         });
         rawResponse = fallback.choices[0].message.content;
       }
-      
+
     } else {
       const messages = [
         { role: "system", content: DIRECT_RESPONSE_PROMPT },
         { role: "user", content: transcript }
       ];
-      
+
       const directResponse = await openai.chat.completions.create({
         model: MODELS.MAIN,
         messages,
         max_tokens: 150,
         temperature: 0.7
       });
-      
+
       rawResponse = directResponse.choices[0].message.content;
     }
-    
+
     let cleanResponse = sanitizeForVoice(rawResponse);
     cleanResponse = truncateForVoice(cleanResponse, 3);
-    
+
     const processingTime = Date.now() - startTime;
     console.log(`[${sessionId}] Response (${processingTime}ms): "${cleanResponse.substring(0, 100)}..."`);
-    
+
     res.json({
       response: cleanResponse,
       queryType: classification.type,
@@ -310,10 +310,10 @@ app.post('/api/process-query', async (req, res) => {
       conversationId,
       cached: false
     });
-    
+
   } catch (error) {
     console.error('[API] Error:', error);
-    
+
     res.status(500).json({
       error: 'Failed to process query',
       response: "I'm sorry, I had trouble with that. Could you try again?",
@@ -325,20 +325,20 @@ app.post('/api/process-query', async (req, res) => {
 
 app.post('/api/web-search', async (req, res) => {
   const { query, sessionId = 'legacy' } = req.body;
-  
+
   if (!query) {
     return res.status(400).json({ error: 'Query is required' });
   }
-  
+
   req.body.transcript = query;
   req.body.sessionId = sessionId;
-  
-  return app._router.handle(req, res, () => {});
+
+  return app._router.handle(req, res, () => { });
 });
 
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     models: MODELS
   });
@@ -359,7 +359,21 @@ app.post('/api/clear-session', (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(503).send(`
+      <html>
+        <head><title>Building...</title></head>
+        <body style="font-family: sans-serif; padding: 2rem; text-align: center;">
+          <h1>App is building...</h1>
+          <p>The frontend assets are being generated. Please reload in a minute.</p>
+          <p>If this persists, the build failed.</p>
+        </body>
+      </html>
+    `);
+  }
 });
 
 const PORT = process.env.PORT || 3001;
@@ -374,7 +388,7 @@ app.listen(PORT, () => {
 ║    - Search: ${MODELS.SEARCH.padEnd(24)}             ║
 ╚════════════════════════════════════════════════════════════╝
   `);
-  
+
   if (OPENAI_API_KEY) {
     console.log('✅ OpenAI API key detected\n');
   } else {
