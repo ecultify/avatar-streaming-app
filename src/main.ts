@@ -5,6 +5,7 @@ import StreamingAvatar, {
   TaskType,
 } from '@heygen/streaming-avatar'
 import { OpenAIAssistant } from './openai-assistant'
+import { initializeVAD, startVAD, pauseVAD, destroyVAD } from './utils/voiceActivityDetection'
 
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
@@ -278,6 +279,7 @@ let isVoiceModeActive = false
 let isRecording = false
 let isAvatarSpeaking = false
 let isProcessingAudio = false
+let vadInitialized = false
 
 const MIN_AUDIO_SIZE = 5000;
 const MIN_TRANSCRIPT_LENGTH = 2;
@@ -323,7 +325,144 @@ async function startVoiceChat() {
   if (!avatar || !openaiAssistant) return
   
   try {
-    updateHeyGenStatus('Starting voice mode...')
+    updateHeyGenStatus('Starting voice mode with VAD...')
+    isVoiceModeActive = true
+    
+    if (!vadInitialized) {
+      await initializeVAD({
+        onSpeechStart: () => {
+          if (!isAvatarSpeaking && !isProcessingAudio) {
+            isRecording = true
+            voiceStatus.textContent = 'Listening... (speech detected)'
+            stopSpeakingBtn.style.display = 'block'
+            console.log('[VAD] Speech started')
+          }
+        },
+        onSpeechEnd: async (audioBlob: Blob) => {
+          isRecording = false
+          stopSpeakingBtn.style.display = 'none'
+          
+          if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
+            console.log('[VAD] Ignoring speech end - avatar speaking or processing')
+            return
+          }
+          
+          console.log('[VAD] Speech ended, audio size:', audioBlob.size)
+          await processVADAudio(audioBlob)
+        },
+        onVADMisfire: () => {
+          console.log('[VAD] Misfire - background noise filtered')
+          voiceStatus.textContent = 'Listening... (noise filtered)'
+        }
+      })
+      vadInitialized = true
+      console.log('[VAD] Initialized successfully')
+    }
+    
+    startVAD()
+    voiceStatus.textContent = 'Listening... (speak anytime)'
+    updateHeyGenStatus('Voice mode active with VAD - Speak now')
+    console.log('[Voice] VAD-based voice mode started')
+    
+  } catch (error) {
+    console.error('[Voice] Error starting VAD voice mode:', error)
+    updateHeyGenStatus('VAD failed, falling back to manual recording...')
+    await startVoiceChatFallback()
+  }
+}
+
+async function processVADAudio(audioBlob: Blob) {
+  if (audioBlob.size < MIN_AUDIO_SIZE) {
+    console.log('[VAD] Audio too short, skipping')
+    voiceStatus.textContent = 'Listening... (speak longer)'
+    return
+  }
+
+  isProcessingAudio = true
+  pauseVAD()
+  voiceStatus.textContent = 'Transcribing...'
+  updateHeyGenStatus('Transcribing with Whisper...')
+  
+  try {
+    const audioFile = new File([audioBlob], 'audio.wav', { type: 'audio/wav' })
+    
+    console.log('[VAD] Sending audio to Whisper, size:', audioBlob.size)
+    const formData = new FormData()
+    formData.append('file', audioFile)
+    formData.append('model', 'whisper-1')
+    formData.append('language', 'en')
+    
+    const transcription = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: formData
+    })
+    
+    if (!transcription.ok) {
+      throw new Error(`Whisper API error: ${transcription.status}`)
+    }
+    
+    const result = await transcription.json()
+    const transcript = result.text
+    
+    console.log('[VAD] Whisper transcript:', transcript)
+    
+    if (!isValidTranscript(transcript)) {
+      voiceStatus.textContent = 'No clear speech - try again'
+      updateHeyGenStatus('Voice mode active - Speak now')
+      isProcessingAudio = false
+      if (isVoiceModeActive) startVAD()
+      return
+    }
+    
+    voiceStatus.textContent = 'Getting AI response...'
+    updateHeyGenStatus('Processing...')
+    
+    const response = await openaiAssistant!.processWithBackend(transcript)
+    console.log('[VAD] AI response:', response)
+    
+    if (!avatar || !isVoiceModeActive) {
+      console.log('[VAD] Session ended, stopping')
+      isProcessingAudio = false
+      return
+    }
+    
+    voiceStatus.textContent = 'Avatar speaking...'
+    isAvatarSpeaking = true
+    await avatar.speak({
+      text: response,
+      taskType: TaskType.REPEAT
+    })
+    isAvatarSpeaking = false
+    
+    voiceStatus.textContent = 'Listening...'
+    updateHeyGenStatus('Voice mode active - Speak now')
+    isProcessingAudio = false
+    
+    if (isVoiceModeActive) {
+      startVAD()
+    }
+    
+  } catch (error) {
+    console.error('[VAD] Error processing audio:', error)
+    voiceStatus.textContent = 'Error - Try again'
+    updateHeyGenStatus('Voice error')
+    isProcessingAudio = false
+    isAvatarSpeaking = false
+    
+    if (isVoiceModeActive) {
+      setTimeout(() => startVAD(), 1000)
+    }
+  }
+}
+
+async function startVoiceChatFallback() {
+  if (!avatar || !openaiAssistant) return
+  
+  try {
+    updateHeyGenStatus('Starting voice mode (fallback)...')
     
     const stream = await navigator.mediaDevices.getUserMedia({ 
       audio: {
@@ -450,12 +589,12 @@ async function startVoiceChat() {
     
     voiceStatus.textContent = 'Listening...'
     updateHeyGenStatus('Voice mode active - Speak now')
-    console.log('[Voice] Voice mode started')
+    console.log('[Voice] Fallback voice mode started')
     
     startRecording()
     
   } catch (error) {
-    console.error('[Voice] Error starting voice mode:', error)
+    console.error('[Voice] Error starting fallback voice mode:', error)
     
     if ((error as any).name === 'NotAllowedError') {
       voiceStatus.textContent = 'Microphone access denied'
@@ -533,6 +672,8 @@ async function switchMode(mode: 'text' | 'voice') {
     isRecording = false
     isProcessingAudio = false
     
+    pauseVAD()
+    
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
         mediaRecorder.stop()
@@ -562,6 +703,9 @@ async function stopAvatarSession() {
     isVoiceModeActive = false
     isRecording = false
     isProcessingAudio = false
+    
+    destroyVAD()
+    vadInitialized = false
     
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
