@@ -7,9 +7,9 @@
     "node": ">=18.x"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
+    "dev": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
     "backend": "node server.js",
     "start": "node server.js"
   },
