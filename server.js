@@ -226,15 +226,17 @@ function extractTextFromResponse(response) {
 const sessionConversations = new Map();
 
 import multer from 'multer';
-const upload = multer({ dest: 'uploads/' });
+import os from 'os';
+const upload = multer({ dest: os.tmpdir() });
 
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
+      console.error('[Transcribe] No file provided');
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    console.log('[Transcribe] Processing audio file:', req.file.path);
+    console.log('[Transcribe] Processing file at:', req.file.path);
 
     const transcription = await openai.audio.transcriptions.create({
       file: fs.createReadStream(req.file.path),
@@ -242,17 +244,28 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
     });
 
     // Cleanup temp file
-    fs.unlinkSync(req.file.path);
+    // Note: in tmpdir files might be cleaned up automatically but good to be explicit
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (cleanupError) {
+      console.warn('[Transcribe] Cleanup warning:', cleanupError);
+    }
 
-    console.log('[Transcribe] Result:', transcription.text);
+    console.log('[Transcribe] Success:', transcription.text.substring(0, 50) + '...');
     res.json({ text: transcription.text });
   } catch (error) {
-    console.error('[Transcribe] Error:', error);
-    // Attempt cleanup on error
+    console.error('[Transcribe] FAILED:', error);
+    console.error('[Transcribe] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+
+    // Attempt cleanup
     if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+      try { fs.unlinkSync(req.file.path); } catch (e) { }
     }
-    res.status(500).json({ error: 'Transcription failed' });
+
+    res.status(500).json({
+      error: 'Transcription failed',
+      details: error.message
+    });
   }
 });
 
