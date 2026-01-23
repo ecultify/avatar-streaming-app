@@ -225,6 +225,37 @@ function extractTextFromResponse(response) {
 
 const sessionConversations = new Map();
 
+import multer from 'multer';
+const upload = multer({ dest: 'uploads/' });
+
+app.post('/api/transcribe', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    console.log('[Transcribe] Processing audio file:', req.file.path);
+
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(req.file.path),
+      model: "whisper-1",
+    });
+
+    // Cleanup temp file
+    fs.unlinkSync(req.file.path);
+
+    console.log('[Transcribe] Result:', transcription.text);
+    res.json({ text: transcription.text });
+  } catch (error) {
+    console.error('[Transcribe] Error:', error);
+    // Attempt cleanup on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: 'Transcription failed' });
+  }
+});
+
 app.post('/api/process-query', async (req, res) => {
   const startTime = Date.now();
 
