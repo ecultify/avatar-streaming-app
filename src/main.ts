@@ -9,12 +9,19 @@ import { API_CONFIG, AVATAR_CONFIG } from './config'
 
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
 
+// Timestamp utility for console logging
+function ts(): string {
+  const now = new Date();
+  return `[${now.toLocaleTimeString('en-US', { hour12: false })}.${now.getMilliseconds().toString().padStart(3, '0')}]`;
+}
+
 function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 // Current session ID for API calls
 let currentSessionId = generateSessionId();
+
 
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -335,6 +342,8 @@ async function transcribeAudio(audioBlob: Blob): Promise<string> {
 // NEW: Unified audio processing (Gemini STT + LLM in one call)
 // This is the streamlined flow: Voice → Gemini → Response
 async function processAudioUnified(audioBlob: Blob, sessionId: string): Promise<string> {
+  console.log(`${ts()} [ProcessAudio] 🎤 Sending audio to Gemini (${(audioBlob.size / 1024).toFixed(1)}KB)`);
+
   const formData = new FormData();
   formData.append('file', audioBlob, audioBlob.type.includes('wav') ? 'audio.wav' : 'audio.webm');
   formData.append('sessionId', sessionId);
@@ -346,12 +355,12 @@ async function processAudioUnified(audioBlob: Blob, sessionId: string): Promise<
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-    console.error('[ProcessAudio] Error:', errorData);
+    console.error(`${ts()} [ProcessAudio] ❌ Error:`, errorData);
     throw new Error(errorData.error || 'Audio processing failed');
   }
 
   const data = await response.json();
-  console.log(`[ProcessAudio] Completed in ${data.processingTime}ms using ${data.model || 'unknown'}`);
+  console.log(`${ts()} [ProcessAudio] ✅ Response in ${data.processingTime}ms (${data.model || 'unknown'})`);
   return data.response || '';
 }
 
@@ -361,16 +370,17 @@ const USE_UNIFIED_PROCESSING = true;
 
 async function processUserSpeech(audioBlob: Blob): Promise<void> {
   if (isProcessingAudio || isAvatarSpeaking) {
-    console.log('[Voice] Busy, ignoring audio');
+    console.log(`${ts()} [Voice] Busy, ignoring audio`);
     return;
   }
 
   if (audioBlob.size < MIN_AUDIO_SIZE) {
-    console.log('[Voice] Audio too short, skipping');
+    console.log(`${ts()} [Voice] Audio too short, skipping`);
     voiceStatus.textContent = 'Listening... (speak longer)';
     return;
   }
 
+  console.log(`${ts()} [Voice] 🎙️ Audio received (${(audioBlob.size / 1024).toFixed(1)}KB)`);
   isProcessingAudio = true;
   pauseVAD();
 
@@ -385,7 +395,7 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
 
       try {
         response = await processAudioUnified(audioBlob, currentSessionId);
-        console.log('[Voice] Unified response:', response);
+        console.log(`${ts()} [Voice] 💬 Response received`);
       } catch (unifiedError) {
         console.warn('[Voice] Unified processing failed, falling back:', unifiedError);
         // Fall back to separate transcription + query
@@ -426,12 +436,13 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
     }
 
     if (!avatar || !isVoiceModeActive) {
-      console.log('[Voice] Session ended');
+      console.log(`${ts()} [Voice] Session ended`);
       isProcessingAudio = false;
       hideProcessing();
       return;
     }
 
+    console.log(`${ts()} [Voice] 🗣️ Avatar starting to speak...`);
     voiceStatus.textContent = 'Avatar speaking...';
     hideProcessing();
     isAvatarSpeaking = true;
@@ -441,6 +452,7 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
       taskType: TaskType.REPEAT
     });
 
+    console.log(`${ts()} [Voice] ✅ Avatar finished speaking`);
     isAvatarSpeaking = false;
     voiceStatus.textContent = 'Listening...';
     updateHeyGenStatus('Voice mode active - Speak now');
