@@ -98,11 +98,12 @@ export async function initializeVAD(callbacks: VADCallbacks): Promise<any> {
         callbacks.onVADMisfire?.();
       },
 
-      positiveSpeechThreshold: 0.8,
-      negativeSpeechThreshold: 0.3,
-      minSpeechMs: 300,
-      preSpeechPadMs: 600,
-      redemptionMs: 800,
+      // VAD Configuration - tuned to let users finish speaking
+      positiveSpeechThreshold: 0.75,    // Slightly lower - easier to detect speech start
+      negativeSpeechThreshold: 0.25,   // Lower - wait longer before considering silence
+      minSpeechMs: 400,                 // Minimum speech duration to process
+      preSpeechPadMs: 500,              // Audio to include before speech detected
+      redemptionMs: 1500,               // Wait 1.5s after speech pause before ending (up from 800)
     });
 
     console.log("[VAD] Initialized successfully!");
