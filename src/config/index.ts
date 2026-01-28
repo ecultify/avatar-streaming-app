@@ -1,7 +1,7 @@
 export const MODELS = {
-  CLASSIFIER: "gpt-4o-mini",
-  MAIN: "gpt-4o-mini",
-  SEARCH: "gpt-4o",
+  CLASSIFIER: "gpt-4.1-nano",
+  MAIN: "gpt-4.1-mini",
+  SEARCH: "gpt-4.1",
 };
 
 export const AVATAR_CONFIG = {

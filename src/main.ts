@@ -8,14 +8,6 @@ import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './util
 import { API_CONFIG, AVATAR_CONFIG } from './config'
 
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || '';
-const DID_API_KEY = import.meta.env.VITE_DID_API_KEY || '';
-
-interface DIDTalkResponse {
-  id: string;
-  result_url?: string;
-  status: string;
-}
 
 function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -25,13 +17,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <h1>AI Avatar Assistant</h1>
     
-    <div class="platform-selector">
-      <button id="heygenTab" class="tab-btn active">HeyGen + OpenAI</button>
-      <button id="didTab" class="tab-btn">D-ID Avatar</button>
-    </div>
-    
     <div id="avatarContainer" class="avatar-container">
-      <!-- HeyGen Section -->
       <div id="heygenSection" class="avatar-section active">
         <div class="section-header">
           <h2>HeyGen Interactive Avatar</h2>
@@ -48,6 +34,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         
         <div class="video-container">
           <video id="heygenVideo" autoplay playsinline></video>
+          <div id="processingIndicator" class="processing-indicator" style="display: none;">
+            <div class="spinner"></div>
+            <span id="processingText">Processing...</span>
+          </div>
         </div>
         
         <div id="textModeControls" class="chat-controls">
@@ -68,29 +58,6 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <p id="heygenSessionInfo"></p>
         </div>
       </div>
-      
-      <!-- D-ID Section -->
-      <div id="didSection" class="avatar-section">
-        <div class="section-header">
-          <h2>D-ID Avatar</h2>
-          <div class="controls">
-            <button id="didStartBtn" type="button">Generate Video</button>
-          </div>
-        </div>
-        <div class="video-container">
-          <video id="didVideo" controls playsinline></video>
-          <div id="didPlaceholder" class="placeholder">
-            <div class="placeholder-content">
-              <p>Enter text below and click "Generate Video"</p>
-              <input type="text" id="didTextInput" placeholder="Enter text for avatar to speak..." value="Hello, I am a D-ID avatar!" />
-            </div>
-          </div>
-        </div>
-        <div class="info">
-          <p id="didStatus">Ready</p>
-          <p id="didSessionInfo"></p>
-        </div>
-      </div>
     </div>
   </div>
 `
@@ -99,13 +66,7 @@ let avatar: StreamingAvatar | null = null
 let sessionId = generateSessionId()
 let sessionData: any = null
 let currentMode: 'text' | 'voice' = 'text'
-let didPollingInterval: number | null = null
 
-const heygenTab = document.querySelector<HTMLButtonElement>('#heygenTab')!
-const didTab = document.querySelector<HTMLButtonElement>('#didTab')!
-
-const heygenSection = document.querySelector<HTMLDivElement>('#heygenSection')!
-const didSection = document.querySelector<HTMLDivElement>('#didSection')!
 
 const heygenStartBtn = document.querySelector<HTMLButtonElement>('#heygenStartBtn')!
 const heygenStopBtn = document.querySelector<HTMLButtonElement>('#heygenStopBtn')!
@@ -123,26 +84,16 @@ const stopSpeakingBtn = document.querySelector<HTMLButtonElement>('#stopSpeaking
 const chatInput = document.querySelector<HTMLInputElement>('#chatInput')!
 const sendBtn = document.querySelector<HTMLButtonElement>('#sendBtn')!
 
-const didStartBtn = document.querySelector<HTMLButtonElement>('#didStartBtn')!
-const didVideo = document.querySelector<HTMLVideoElement>('#didVideo')!
-const didPlaceholder = document.querySelector<HTMLDivElement>('#didPlaceholder')!
-const didTextInput = document.querySelector<HTMLInputElement>('#didTextInput')!
-const didStatus = document.querySelector<HTMLParagraphElement>('#didStatus')!
-const didSessionInfo = document.querySelector<HTMLParagraphElement>('#didSessionInfo')!
+const processingIndicator = document.querySelector<HTMLDivElement>('#processingIndicator')!
+const processingText = document.querySelector<HTMLSpanElement>('#processingText')!
 
-function switchView(view: 'heygen' | 'did') {
-  heygenTab.classList.remove('active')
-  didTab.classList.remove('active')
-  heygenSection.classList.remove('active')
-  didSection.classList.remove('active')
+function showProcessing(message: string) {
+  processingIndicator.style.display = 'flex'
+  processingText.textContent = message
+}
 
-  if (view === 'heygen') {
-    heygenTab.classList.add('active')
-    heygenSection.classList.add('active')
-  } else {
-    didTab.classList.add('active')
-    didSection.classList.add('active')
-  }
+function hideProcessing() {
+  processingIndicator.style.display = 'none'
 }
 
 function updateHeyGenStatus(message: string) {
@@ -270,12 +221,22 @@ async function handleSpeak() {
     chatInput.value = ''
     sendBtn.disabled = true
 
+    // Stop avatar if speaking
+    if (isAvatarSpeaking) {
+      // avatar.interrupt() not available in types, but new speak should override
+      isAvatarSpeaking = false
+    }
+
     try {
       updateHeyGenStatus('Getting AI response...')
+      showProcessing('Getting AI response...')
+
       const response = await getAIResponse(userMessage)
       console.log('[HeyGen] AI response:', response)
 
+      hideProcessing()
       updateHeyGenStatus('Avatar speaking...')
+
       await avatar.speak({
         text: response,
         taskType: TaskType.REPEAT
@@ -286,6 +247,7 @@ async function handleSpeak() {
     } catch (error) {
       console.error('[HeyGen] Error getting response:', error)
       updateHeyGenStatus('Error: ' + error)
+      hideProcessing()
       sendBtn.disabled = false
     }
   }
@@ -399,16 +361,26 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
     voiceStatus.textContent = 'Getting AI response...';
     updateHeyGenStatus('Processing...');
 
+    showProcessing('Getting AI response...');
+
+    // Stop avatar if speaking (interrupt)
+    if (isAvatarSpeaking) {
+      // avatar.interrupt() not available in types
+      isAvatarSpeaking = false;
+    }
+
     const response = await getAIResponse(transcript);
     console.log('[Voice] AI response:', response);
 
     if (!avatar || !isVoiceModeActive) {
       console.log('[Voice] Session ended');
       isProcessingAudio = false;
+      hideProcessing();
       return;
     }
 
     voiceStatus.textContent = 'Avatar speaking...';
+    hideProcessing();
     isAvatarSpeaking = true;
 
     await avatar.speak({
@@ -429,6 +401,7 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
     console.error('[Voice] Error:', error);
     voiceStatus.textContent = 'Error - Try again';
     updateHeyGenStatus('Voice error');
+    hideProcessing();
     isProcessingAudio = false;
     isAvatarSpeaking = false;
 
@@ -447,7 +420,13 @@ async function startVoiceChatWithVAD() {
 
     await initializeVAD({
       onSpeechStart: () => {
-        if (!isAvatarSpeaking && !isProcessingAudio) {
+        // Interrupt if avatar is speaking
+        if (isAvatarSpeaking) {
+          console.log('[VAD] Interrupting avatar...');
+          isAvatarSpeaking = false;
+        }
+
+        if (!isProcessingAudio) {
           isRecording = true;
           voiceStatus.textContent = 'Listening... (speech detected)';
           stopSpeakingBtn.style.display = 'block';
@@ -714,136 +693,6 @@ async function stopAvatarSession() {
   }
 }
 
-function updateDIDStatus(message: string) {
-  console.log('[D-ID]', message)
-  didStatus.textContent = message
-}
-
-async function createDIDTalk(text: string): Promise<string> {
-  updateDIDStatus('Creating talk...')
-
-  const requestData = {
-    script: {
-      type: 'text',
-      input: text,
-      provider: {
-        type: 'microsoft',
-        voice_id: 'en-US-JennyNeural'
-      }
-    },
-    config: {
-      stitch: true
-    },
-    source_url: 'https://create-images-results.d-id.com/DefaultPresenters/Noelle_f/image.png'
-  }
-
-  console.log('[D-ID] Creating talk with text:', text)
-
-  const response = await fetch('https://api.d-id.com/talks', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${btoa(DID_API_KEY)}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestData)
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error('[D-ID] API Error:', errorText)
-    throw new Error(`Failed to create D-ID talk: ${response.statusText}`)
-  }
-
-  const data: DIDTalkResponse = await response.json()
-  console.log('[D-ID] Talk created:', data)
-
-  return data.id
-}
-
-async function pollDIDTalkStatus(talkId: string): Promise<void> {
-  updateDIDStatus('Generating video...')
-  didSessionInfo.textContent = `Talk ID: ${talkId}`
-
-  const checkStatus = async () => {
-    try {
-      const response = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-        headers: {
-          'Authorization': `Basic ${btoa(DID_API_KEY)}`
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to check talk status')
-      }
-
-      const data: DIDTalkResponse = await response.json()
-      console.log('[D-ID] Talk status:', data.status)
-
-      if (data.status === 'done' && data.result_url) {
-        if (didPollingInterval) {
-          clearInterval(didPollingInterval)
-          didPollingInterval = null
-        }
-
-        console.log('[D-ID] Video ready:', data.result_url)
-        didVideo.src = data.result_url
-        didVideo.style.display = 'block'
-        didPlaceholder.style.display = 'none'
-        updateDIDStatus('Video ready - Click play')
-        didSessionInfo.textContent = 'Video generated successfully'
-        didStartBtn.disabled = false
-
-      } else if (data.status === 'error' || data.status === 'rejected') {
-        if (didPollingInterval) {
-          clearInterval(didPollingInterval)
-          didPollingInterval = null
-        }
-        updateDIDStatus(`Error: ${data.status}`)
-        didStartBtn.disabled = false
-      } else {
-        updateDIDStatus(`Generating (${data.status})...`)
-      }
-    } catch (error) {
-      console.error('[D-ID] Error checking status:', error)
-      if (didPollingInterval) {
-        clearInterval(didPollingInterval)
-        didPollingInterval = null
-      }
-      updateDIDStatus('Error checking status')
-      didStartBtn.disabled = false
-    }
-  }
-
-  await checkStatus()
-  didPollingInterval = window.setInterval(checkStatus, 2000)
-}
-
-async function startDIDVideo() {
-  const text = didTextInput.value.trim()
-
-  if (!text) {
-    updateDIDStatus('Please enter text first')
-    return
-  }
-
-  try {
-    didStartBtn.disabled = true
-    didVideo.style.display = 'none'
-    didPlaceholder.style.display = 'flex'
-
-    const talkId = await createDIDTalk(text)
-    await pollDIDTalkStatus(talkId)
-
-  } catch (error) {
-    console.error('[D-ID] Error:', error)
-    updateDIDStatus(`Error: ${error}`)
-    didStartBtn.disabled = false
-  }
-}
-
-heygenTab.addEventListener('click', () => switchView('heygen'))
-didTab.addEventListener('click', () => switchView('did'))
-
 heygenStartBtn.addEventListener('click', initializeAvatarSession)
 heygenStopBtn.addEventListener('click', stopAvatarSession)
 
@@ -867,11 +716,10 @@ stopSpeakingBtn.addEventListener('click', () => {
   }
 })
 
-didStartBtn.addEventListener('click', startDIDVideo)
-
 window.addEventListener('beforeunload', () => {
   destroyVAD();
   if (avatar) {
     avatar.stopAvatar();
   }
 });
+

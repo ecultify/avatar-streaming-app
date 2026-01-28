@@ -1,6 +1,5 @@
 import OpenAI from "openai";
-import { classifyQuery, type QueryType } from './utils/queryClassifier';
-import { prepareForVoice } from './utils/responseSanitizer';
+import { classifyQuery } from './utils/queryClassifier';
 import { getInstantResponse } from './config/prompts';
 import { getCachedResponse, setCachedResponse } from './utils/responseCache';
 import { DIRECT_RESPONSE_PROMPT } from './config/prompts';
@@ -17,13 +16,13 @@ export class OpenAIAssistant {
   }
 
   async initialize(
-    instructions: string = ASSISTANT_INSTRUCTIONS
+    instructions: string = "You are a helpful assistant."
   ) {
     this.assistant = await this.client.beta.assistants.create({
       name: "HeyGen Avatar Assistant",
       instructions,
       tools: [],
-      model: "gpt-4o",
+      model: "gpt-4.1-mini",
     });
 
     this.thread = await this.client.beta.threads.create();
@@ -33,7 +32,7 @@ export class OpenAIAssistant {
   private async getResponseWithWebSearch(userMessage: string): Promise<string> {
     try {
       console.log('[WebSearch] Calling backend for real-time search');
-      
+
       const searchResponse = await fetch('http://localhost:3001/api/web-search', {
         method: 'POST',
         headers: {
@@ -50,7 +49,7 @@ export class OpenAIAssistant {
       console.log('[WebSearch] Got response:', searchData.success);
 
       return searchData.summary || "I couldn't find that information.";
-      
+
     } catch (error) {
       console.error('[WebSearch] Error:', error);
       throw error;
@@ -92,7 +91,7 @@ export class OpenAIAssistant {
 
   private async getSimpleCompletion(userMessage: string): Promise<string> {
     const response = await this.client.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: DIRECT_RESPONSE_PROMPT },
         { role: "user", content: userMessage }
@@ -100,7 +99,7 @@ export class OpenAIAssistant {
       max_tokens: 150,
       temperature: 0.7
     });
-    
+
     return response.choices[0].message.content || "I'm not sure how to respond to that.";
   }
 
@@ -129,7 +128,7 @@ export class OpenAIAssistant {
 
     let rawResponse: string;
 
-    if (queryType === 'web_search') {
+    if (queryType.type === 'web_search') {
       try {
         rawResponse = await this.getResponseWithWebSearch(userMessage);
       } catch (error) {
@@ -145,9 +144,9 @@ export class OpenAIAssistant {
       }
     }
 
-    const cleanResponse = cleanResponseForAvatar(rawResponse);
+    const cleanResponse = rawResponse;
 
-    setCachedResponse(userMessage, cleanResponse, queryType);
+    setCachedResponse(userMessage, cleanResponse, queryType.type as any);
 
     const processingTime = Date.now() - startTime;
     console.log(`[Assistant] Response (${processingTime}ms):`, cleanResponse.substring(0, 80) + '...');
@@ -162,7 +161,7 @@ export class OpenAIAssistant {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           transcript: userMessage,
           sessionId: this.sessionId
         })
@@ -174,7 +173,7 @@ export class OpenAIAssistant {
 
       const data = await response.json();
       console.log('[Assistant] Backend response:', data.queryType, `(${data.processingTime}ms)`);
-      
+
       return data.response;
     } catch (error) {
       console.error('[Assistant] Backend failed, using local processing:', error);
