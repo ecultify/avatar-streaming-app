@@ -13,6 +13,10 @@ function generateSessionId(): string {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+// Current session ID for API calls
+let currentSessionId = generateSessionId();
+
+
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <h1>AI Avatar Assistant</h1>
@@ -328,6 +332,33 @@ async function transcribeAudio(audioBlob: Blob): Promise<string> {
   return data.text || '';
 }
 
+// NEW: Unified audio processing (Gemini STT + LLM in one call)
+// This is the streamlined flow: Voice → Gemini → Response
+async function processAudioUnified(audioBlob: Blob, sessionId: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, audioBlob.type.includes('wav') ? 'audio.wav' : 'audio.webm');
+  formData.append('sessionId', sessionId);
+
+  const response = await fetch(`${API_CONFIG.BACKEND_URL}/api/process-audio`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    console.error('[ProcessAudio] Error:', errorData);
+    throw new Error(errorData.error || 'Audio processing failed');
+  }
+
+  const data = await response.json();
+  console.log(`[ProcessAudio] Completed in ${data.processingTime}ms using ${data.model || 'unknown'}`);
+  return data.response || '';
+}
+
+// Flag to use unified processing (Gemini) vs separate transcription + query
+const USE_UNIFIED_PROCESSING = true;
+
+
 async function processUserSpeech(audioBlob: Blob): Promise<void> {
   if (isProcessingAudio || isAvatarSpeaking) {
     console.log('[Voice] Busy, ignoring audio');
@@ -344,33 +375,55 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
   pauseVAD();
 
   try {
-    voiceStatus.textContent = 'Transcribing...';
-    updateHeyGenStatus('Transcribing...');
+    let response: string;
 
-    const transcript = await transcribeAudio(audioBlob);
-    console.log('[Voice] Transcript:', transcript);
+    if (USE_UNIFIED_PROCESSING) {
+      // Unified flow: Audio → Gemini (STT + LLM) → Response
+      voiceStatus.textContent = 'Processing...';
+      updateHeyGenStatus('Processing audio...');
+      showProcessing('Processing with Gemini...');
 
-    if (!isValidTranscript(transcript)) {
-      voiceStatus.textContent = 'No clear speech - try again';
-      updateHeyGenStatus('Voice mode active - Speak now');
-      isProcessingAudio = false;
-      if (isVoiceModeActive && vadInitialized) resumeVAD();
-      return;
+      try {
+        response = await processAudioUnified(audioBlob, currentSessionId);
+        console.log('[Voice] Unified response:', response);
+      } catch (unifiedError) {
+        console.warn('[Voice] Unified processing failed, falling back:', unifiedError);
+        // Fall back to separate transcription + query
+        voiceStatus.textContent = 'Transcribing...';
+        const transcript = await transcribeAudio(audioBlob);
+        if (!isValidTranscript(transcript)) {
+          throw new Error('Invalid transcript');
+        }
+        response = await getAIResponse(transcript);
+      }
+    } else {
+      // Traditional flow: Audio → Whisper (STT) → GPT (LLM) → Response
+      voiceStatus.textContent = 'Transcribing...';
+      updateHeyGenStatus('Transcribing...');
+
+      const transcript = await transcribeAudio(audioBlob);
+      console.log('[Voice] Transcript:', transcript);
+
+      if (!isValidTranscript(transcript)) {
+        voiceStatus.textContent = 'No clear speech - try again';
+        updateHeyGenStatus('Voice mode active - Speak now');
+        isProcessingAudio = false;
+        if (isVoiceModeActive && vadInitialized) resumeVAD();
+        return;
+      }
+
+      voiceStatus.textContent = 'Getting AI response...';
+      updateHeyGenStatus('Processing...');
+      showProcessing('Getting AI response...');
+
+      response = await getAIResponse(transcript);
+      console.log('[Voice] AI response:', response);
     }
-
-    voiceStatus.textContent = 'Getting AI response...';
-    updateHeyGenStatus('Processing...');
-
-    showProcessing('Getting AI response...');
 
     // Stop avatar if speaking (interrupt)
     if (isAvatarSpeaking) {
-      // avatar.interrupt() not available in types
       isAvatarSpeaking = false;
     }
-
-    const response = await getAIResponse(transcript);
-    console.log('[Voice] AI response:', response);
 
     if (!avatar || !isVoiceModeActive) {
       console.log('[Voice] Session ended');

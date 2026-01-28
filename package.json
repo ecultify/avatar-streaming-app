@@ -16,7 +16,9 @@
     "postinstall": "npm run build"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@heygen/streaming-avatar": "^2.1.0",
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@ricky0123/vad-web": "^0.0.29",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",

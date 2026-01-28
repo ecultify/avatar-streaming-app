@@ -23,13 +23,26 @@ if (!fs.existsSync(distPath)) {
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// Gemini setup
+import { GoogleGenerativeAI } from '@google/generative-ai';
+const genAI = GOOGLE_API_KEY ? new GoogleGenerativeAI(GOOGLE_API_KEY) : null;
+
+// Use Gemini if available, otherwise fall back to OpenAI
+const USE_GEMINI = !!genAI;
+console.log(`[Config] Using ${USE_GEMINI ? 'Gemini 2.0 Flash' : 'OpenAI'} for AI processing`);
+
 const MODELS = {
+  // OpenAI models (fallback)
   CLASSIFIER: "gpt-4.1-nano",
   MAIN: "gpt-4.1-mini",
   SEARCH: "gpt-4.1",
-  TRANSCRIPTION: "gpt-4o-audio-preview",  // GPT-4o multimodal for audio
+  TRANSCRIPTION: "whisper-1",
+  // Gemini models (primary)
+  GEMINI_MAIN: "gemini-2.0-flash",
+  GEMINI_SEARCH: "gemini-2.0-flash",
 };
 
 const AVATAR_NAME = "Marianne";
@@ -229,107 +242,162 @@ import os from 'os';
 const upload = multer({ dest: os.tmpdir() });
 
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+
   try {
     if (!req.file) {
       console.error('[Transcribe] No file provided');
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    console.log('[Transcribe] Processing file at:', req.file.path);
+    console.log('[Transcribe] Processing file:', req.file.path);
 
-    // Read the audio file and convert to base64
-    const audioBuffer = fs.readFileSync(req.file.path);
-    const base64Audio = audioBuffer.toString('base64');
-
-    // Determine the audio format from the original filename
+    // Ensure file has proper extension for Whisper
     const originalName = req.file.originalname || 'audio.wav';
-    const extension = path.extname(originalName).toLowerCase().replace('.', '') || 'wav';
-    const mimeType = extension === 'webm' ? 'audio/webm'
-      : extension === 'mp3' ? 'audio/mp3'
-        : extension === 'ogg' ? 'audio/ogg'
-          : 'audio/wav';
+    const extension = path.extname(originalName) || '.wav';
+    const newPath = req.file.path + extension;
 
-    console.log('[Transcribe] Audio format:', mimeType, 'Size:', audioBuffer.length);
+    fs.renameSync(req.file.path, newPath);
+    req.file.path = newPath;
 
-    // Use GPT-4o multimodal for audio transcription
-    const response = await openai.chat.completions.create({
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(newPath),
       model: MODELS.TRANSCRIPTION,
-      modalities: ["text"],
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "Please transcribe the following audio exactly as spoken. Return ONLY the transcription, nothing else. If there is no speech, return an empty string."
-            },
-            {
-              type: "input_audio",
-              input_audio: {
-                data: base64Audio,
-                format: extension === 'webm' ? 'wav' : extension  // webm needs conversion
-              }
-            }
-          ]
-        }
-      ],
-      max_tokens: 500,
-      temperature: 0
+      response_format: "text",  // Faster than json
     });
 
     // Cleanup temp file
-    try {
-      fs.unlinkSync(req.file.path);
-    } catch (cleanupError) {
-      console.warn('[Transcribe] Cleanup warning:', cleanupError);
-    }
+    try { fs.unlinkSync(req.file.path); } catch (e) { }
 
-    const transcription = response.choices[0]?.message?.content?.trim() || '';
-    console.log('[Transcribe] Success:', transcription.substring(0, 50) + '...');
+    const elapsed = Date.now() - startTime;
+    console.log(`[Transcribe] ✓ ${elapsed}ms: "${transcription.substring(0, 50)}..."`);
+
     res.json({ text: transcription });
 
   } catch (error) {
-    console.error('[Transcribe] FAILED:', error);
-    console.error('[Transcribe] Error details:', error.message);
+    console.error('[Transcribe] FAILED:', error.message);
 
-    // Fallback to standard transcription API if GPT-4o audio fails
-    try {
-      console.log('[Transcribe] Attempting fallback to whisper-1...');
+    // Cleanup
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) { }
+    }
 
-      // Ensure file has extension for whisper
-      const originalName = req.file.originalname;
+    res.status(500).json({
+      error: 'Transcription failed',
+      details: error.message
+    });
+  }
+});
+
+// NEW: Unified audio processing endpoint (Gemini STT + LLM in one call)
+// This is the streamlined approach: Voice → Gemini → Response
+app.post('/api/process-audio', upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    const sessionId = req.body.sessionId || 'default';
+    console.log(`[${sessionId}] Processing audio directly with Gemini...`);
+
+    // Check if Gemini is available
+    if (!USE_GEMINI || !genAI) {
+      // Fall back to separate transcription + processing
+      console.log('[ProcessAudio] Gemini not available, using fallback flow');
+
+      // First transcribe
+      const originalName = req.file.originalname || 'audio.wav';
       const extension = path.extname(originalName) || '.wav';
       const newPath = req.file.path + extension;
-
-      if (!req.file.path.endsWith(extension)) {
-        fs.renameSync(req.file.path, newPath);
-        req.file.path = newPath;
-      }
+      fs.renameSync(req.file.path, newPath);
 
       const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(req.file.path),
-        model: "whisper-1",
+        file: fs.createReadStream(newPath),
+        model: MODELS.TRANSCRIPTION,
+        response_format: "text",
       });
 
-      // Cleanup
-      try { fs.unlinkSync(req.file.path); } catch (e) { }
+      try { fs.unlinkSync(newPath); } catch (e) { }
 
-      console.log('[Transcribe] Fallback success:', transcription.text.substring(0, 50) + '...');
-      res.json({ text: transcription.text });
-
-    } catch (fallbackError) {
-      console.error('[Transcribe] Fallback also failed:', fallbackError.message);
-
-      // Attempt cleanup
-      if (req.file && fs.existsSync(req.file.path)) {
-        try { fs.unlinkSync(req.file.path); } catch (e) { }
-      }
-
-      res.status(500).json({
-        error: 'Transcription failed',
-        details: error.message
-      });
+      // Then forward to process-query logic
+      req.body.transcript = transcription;
+      // Continue with normal processing below
     }
+
+    // Read audio as base64 for Gemini
+    const audioBuffer = fs.readFileSync(req.file.path);
+    const base64Audio = audioBuffer.toString('base64');
+
+    // Determine mime type
+    const originalName = req.file.originalname || 'audio.wav';
+    const ext = path.extname(originalName).toLowerCase();
+    const mimeType = ext === '.webm' ? 'audio/webm'
+      : ext === '.mp3' ? 'audio/mp3'
+        : ext === '.ogg' ? 'audio/ogg'
+          : 'audio/wav';
+
+    // Cleanup file immediately
+    try { fs.unlinkSync(req.file.path); } catch (e) { }
+
+    // Use Gemini 2.0 Flash with audio input
+    const model = genAI.getGenerativeModel({
+      model: MODELS.GEMINI_MAIN,
+      generationConfig: {
+        maxOutputTokens: 200,
+        temperature: 0.7,
+      }
+    });
+
+    const prompt = `${DIRECT_RESPONSE_PROMPT}
+
+Listen to this audio message and respond naturally as ${AVATAR_NAME}. 
+Keep your response conversational and brief (1-3 sentences).
+Do not include any transcription - just respond directly to what was said.`;
+
+    const result = await model.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Audio
+            }
+          }
+        ]
+      }]
+    });
+
+    let rawResponse = result.response.text();
+    let cleanResponse = sanitizeForVoice(rawResponse);
+    cleanResponse = truncateForVoice(cleanResponse, 3);
+
+    const processingTime = Date.now() - startTime;
+    console.log(`[${sessionId}] ✓ Unified processing (${processingTime}ms): "${cleanResponse.substring(0, 50)}..."`);
+
+    res.json({
+      response: cleanResponse,
+      queryType: 'unified',
+      processingTime,
+      sessionId,
+      model: 'gemini-2.0-flash'
+    });
+
+  } catch (error) {
+    console.error('[ProcessAudio] Error:', error.message);
+
+    // Cleanup
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) { }
+    }
+
+    res.status(500).json({
+      error: 'Audio processing failed',
+      details: error.message
+    });
   }
 });
 
@@ -364,43 +432,92 @@ app.post('/api/process-query', async (req, res) => {
     let rawResponse;
     let conversationId = sessionConversations.get(sessionId);
 
-    if (classification.type === 'web_search') {
+    // Use Gemini if available (faster, unified processing)
+    if (USE_GEMINI && genAI) {
       try {
-        const searchResponse = await openai.responses.create({
-          model: MODELS.SEARCH,
-          input: transcript,
-          tools: [{ type: "web_search" }],
-          instructions: WEB_SEARCH_PROMPT,
+        const model = genAI.getGenerativeModel({
+          model: MODELS.GEMINI_MAIN,
+          generationConfig: {
+            maxOutputTokens: 200,
+            temperature: 0.7,
+          }
         });
 
-        rawResponse = extractTextFromResponse(searchResponse);
-      } catch (error) {
-        console.error('[WebSearch] Responses API failed:', error.message);
-        const fallback = await openai.chat.completions.create({
-          model: MODELS.SEARCH,
-          messages: [
-            { role: "system", content: WEB_SEARCH_PROMPT },
-            { role: "user", content: transcript }
-          ],
-          max_tokens: 200
-        });
-        rawResponse = fallback.choices[0].message.content;
+        // For web search queries, use Google Search grounding
+        if (classification.type === 'web_search') {
+          const searchModel = genAI.getGenerativeModel({
+            model: MODELS.GEMINI_SEARCH,
+            tools: [{ googleSearch: {} }],
+            generationConfig: {
+              maxOutputTokens: 200,
+              temperature: 0.5,
+            }
+          });
+
+          const result = await searchModel.generateContent({
+            contents: [{ role: 'user', parts: [{ text: transcript }] }],
+            systemInstruction: WEB_SEARCH_PROMPT,
+          });
+
+          rawResponse = result.response.text();
+        } else {
+          // Direct response
+          const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: transcript }] }],
+            systemInstruction: DIRECT_RESPONSE_PROMPT,
+          });
+
+          rawResponse = result.response.text();
+        }
+
+        console.log(`[Gemini] Response generated successfully`);
+      } catch (geminiError) {
+        console.error('[Gemini] Error, falling back to OpenAI:', geminiError.message);
+        // Fall through to OpenAI
+        rawResponse = null;
       }
+    }
 
-    } else {
-      const messages = [
-        { role: "system", content: DIRECT_RESPONSE_PROMPT },
-        { role: "user", content: transcript }
-      ];
+    // OpenAI fallback
+    if (!rawResponse) {
+      if (classification.type === 'web_search') {
+        try {
+          const searchResponse = await openai.responses.create({
+            model: MODELS.SEARCH,
+            input: transcript,
+            tools: [{ type: "web_search" }],
+            instructions: WEB_SEARCH_PROMPT,
+          });
 
-      const directResponse = await openai.chat.completions.create({
-        model: MODELS.MAIN,
-        messages,
-        max_tokens: 150,
-        temperature: 0.7
-      });
+          rawResponse = extractTextFromResponse(searchResponse);
+        } catch (error) {
+          console.error('[WebSearch] Responses API failed:', error.message);
+          const fallback = await openai.chat.completions.create({
+            model: MODELS.SEARCH,
+            messages: [
+              { role: "system", content: WEB_SEARCH_PROMPT },
+              { role: "user", content: transcript }
+            ],
+            max_tokens: 200
+          });
+          rawResponse = fallback.choices[0].message.content;
+        }
 
-      rawResponse = directResponse.choices[0].message.content;
+      } else {
+        const messages = [
+          { role: "system", content: DIRECT_RESPONSE_PROMPT },
+          { role: "user", content: transcript }
+        ];
+
+        const directResponse = await openai.chat.completions.create({
+          model: MODELS.MAIN,
+          messages,
+          max_tokens: 150,
+          temperature: 0.7
+        });
+
+        rawResponse = directResponse.choices[0].message.content;
+      }
     }
 
     let cleanResponse = sanitizeForVoice(rawResponse);
