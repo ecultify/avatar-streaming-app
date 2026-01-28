@@ -241,6 +241,71 @@ import multer from 'multer';
 import os from 'os';
 const upload = multer({ dest: os.tmpdir() });
 
+// --- Krisp Batch API Helpers ---
+const KRISP_API_KEY = process.env.KRISP_API_KEY || process.env.VITE_KRISP_API_KEY;
+const KRISP_API_BASE = 'https://sdkapi.krisp.ai/v2/sdk';
+
+async function processWithKrisp(audioBuffer, contentType = 'audio/wav') {
+  if (!KRISP_API_KEY) {
+    console.log('[Krisp] No API key configured, skipping');
+    return audioBuffer;
+  }
+
+  const startTime = Date.now();
+  console.log(`[Krisp] Starting noise cancellation (${(audioBuffer.length / 1024).toFixed(1)}KB)`);
+
+  try {
+    // 1. Get upload URL
+    const fileName = `audio-NC-${Date.now()}.wav`;
+    const uploadRes = await fetch(`${KRISP_API_BASE}/process-upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `api-key ${KRISP_API_KEY}`
+      },
+      body: JSON.stringify({ fileName, contentType, service: 'NC' })
+    });
+
+    if (!uploadRes.ok) throw new Error(`Upload URL failed: ${uploadRes.status}`);
+    const uploadData = await uploadRes.json();
+    if (uploadData.code !== 0) throw new Error(`Krisp error: ${uploadData.message}`);
+
+    // 2. Upload audio
+    const { uploadUrl, processId } = uploadData.data;
+    const putRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType },
+      body: audioBuffer
+    });
+    if (!putRes.ok) throw new Error(`Upload failed: ${putRes.status}`);
+
+    // 3. Poll for completion
+    let attempts = 0;
+    while (attempts < 10) {
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(1.5, attempts))); // Exponential backoff
+      attempts++;
+
+      const statusRes = await fetch(`${KRISP_API_BASE}/process-status/${processId}`, {
+        headers: { 'Authorization': `api-key ${KRISP_API_KEY}` }
+      });
+      const statusData = await statusRes.json();
+
+      if (statusData.data.status === 'COMPLETED') {
+        const downloadRes = await fetch(statusData.data.downloadUrl);
+        const arrayBuffer = await downloadRes.arrayBuffer();
+        console.log(`[Krisp] ✓ Completed in ${Date.now() - startTime}ms`);
+        return Buffer.from(arrayBuffer);
+      }
+      if (statusData.data.status === 'FAILED') throw new Error(statusData.data.error);
+    }
+    throw new Error('Polling timeout');
+  } catch (error) {
+    console.error(`[Krisp] Failed: ${error.message}, using original audio`);
+    return audioBuffer; // Fallback to original
+  }
+}
+// -------------------------------
+
 app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   const startTime = Date.now();
 
@@ -326,8 +391,16 @@ app.post('/api/process-audio', upload.single('file'), async (req, res) => {
       // Continue with normal processing below
     }
 
-    // Read audio as base64 for Gemini
-    const audioBuffer = fs.readFileSync(req.file.path);
+    // Read audio
+    let audioBuffer = fs.readFileSync(req.file.path);
+
+    // Process with Krisp if available (and file exists)
+    if (KRISP_API_KEY && fs.existsSync(req.file.path)) {
+      const mimeType = req.file.mimetype || 'audio/wav';
+      // Pass buffer to Krisp
+      audioBuffer = await processWithKrisp(audioBuffer, mimeType);
+    }
+
     const base64Audio = audioBuffer.toString('base64');
 
     // Determine mime type
