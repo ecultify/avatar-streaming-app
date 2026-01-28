@@ -1,0 +1,11 @@
+# Railway configuration
+# Use npm instead of bun for package management
+
+[build]
+builder = "nixpacks"
+
+[build.buildCommand]
+command = "npm install && npm run build"
+
+[deploy]
+startCommand = "npm run start"
