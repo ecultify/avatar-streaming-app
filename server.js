@@ -29,7 +29,7 @@ const MODELS = {
   CLASSIFIER: "gpt-4.1-nano",
   MAIN: "gpt-4.1-mini",
   SEARCH: "gpt-4.1",
-  TRANSCRIPTION: "gpt-4o-mini-transcribe",
+  TRANSCRIPTION: "gpt-4o-audio-preview",  // GPT-4o multimodal for audio
 };
 
 const AVATAR_NAME = "Marianne";
@@ -237,43 +237,99 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
     console.log('[Transcribe] Processing file at:', req.file.path);
 
-    // OpenAI requires a file extension to determine the format. 
-    // Multer saves as a random string without extension, so we must rename it.
-    const originalName = req.file.originalname;
-    const extension = path.extname(originalName) || '.wav'; // Default to .wav if missing
-    const newPath = req.file.path + extension;
+    // Read the audio file and convert to base64
+    const audioBuffer = fs.readFileSync(req.file.path);
+    const base64Audio = audioBuffer.toString('base64');
 
-    fs.renameSync(req.file.path, newPath);
-    req.file.path = newPath; // Update path for cleanup later
+    // Determine the audio format from the original filename
+    const originalName = req.file.originalname || 'audio.wav';
+    const extension = path.extname(originalName).toLowerCase().replace('.', '') || 'wav';
+    const mimeType = extension === 'webm' ? 'audio/webm'
+      : extension === 'mp3' ? 'audio/mp3'
+        : extension === 'ogg' ? 'audio/ogg'
+          : 'audio/wav';
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(newPath),
+    console.log('[Transcribe] Audio format:', mimeType, 'Size:', audioBuffer.length);
+
+    // Use GPT-4o multimodal for audio transcription
+    const response = await openai.chat.completions.create({
       model: MODELS.TRANSCRIPTION,
+      modalities: ["text"],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please transcribe the following audio exactly as spoken. Return ONLY the transcription, nothing else. If there is no speech, return an empty string."
+            },
+            {
+              type: "input_audio",
+              input_audio: {
+                data: base64Audio,
+                format: extension === 'webm' ? 'wav' : extension  // webm needs conversion
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 500,
+      temperature: 0
     });
 
     // Cleanup temp file
-    // Note: in tmpdir files might be cleaned up automatically but good to be explicit
     try {
       fs.unlinkSync(req.file.path);
     } catch (cleanupError) {
       console.warn('[Transcribe] Cleanup warning:', cleanupError);
     }
 
-    console.log('[Transcribe] Success:', transcription.text.substring(0, 50) + '...');
-    res.json({ text: transcription.text });
+    const transcription = response.choices[0]?.message?.content?.trim() || '';
+    console.log('[Transcribe] Success:', transcription.substring(0, 50) + '...');
+    res.json({ text: transcription });
+
   } catch (error) {
     console.error('[Transcribe] FAILED:', error);
-    console.error('[Transcribe] Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    console.error('[Transcribe] Error details:', error.message);
 
-    // Attempt cleanup
-    if (req.file && fs.existsSync(req.file.path)) {
+    // Fallback to standard transcription API if GPT-4o audio fails
+    try {
+      console.log('[Transcribe] Attempting fallback to whisper-1...');
+
+      // Ensure file has extension for whisper
+      const originalName = req.file.originalname;
+      const extension = path.extname(originalName) || '.wav';
+      const newPath = req.file.path + extension;
+
+      if (!req.file.path.endsWith(extension)) {
+        fs.renameSync(req.file.path, newPath);
+        req.file.path = newPath;
+      }
+
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(req.file.path),
+        model: "whisper-1",
+      });
+
+      // Cleanup
       try { fs.unlinkSync(req.file.path); } catch (e) { }
-    }
 
-    res.status(500).json({
-      error: 'Transcription failed',
-      details: error.message
-    });
+      console.log('[Transcribe] Fallback success:', transcription.text.substring(0, 50) + '...');
+      res.json({ text: transcription.text });
+
+    } catch (fallbackError) {
+      console.error('[Transcribe] Fallback also failed:', fallbackError.message);
+
+      // Attempt cleanup
+      if (req.file && fs.existsSync(req.file.path)) {
+        try { fs.unlinkSync(req.file.path); } catch (e) { }
+      }
+
+      res.status(500).json({
+        error: 'Transcription failed',
+        details: error.message
+      });
+    }
   }
 });
 
