@@ -679,6 +679,86 @@ app.get('*', (req, res) => {
   }
 });
 
+// ============================================
+// VAPI Web Search Tool Endpoint
+// ============================================
+app.post('/api/vapi-websearch', async (req, res) => {
+  console.log('[VAPI WebSearch] Received request');
+
+  try {
+    const { message } = req.body;
+
+    // Extract query from VAPI tool call format
+    const toolCall = message?.toolCalls?.[0];
+    const query = toolCall?.function?.arguments?.query;
+
+    if (!query) {
+      console.log('[VAPI WebSearch] No query provided');
+      return res.json({
+        results: [{
+          toolCallId: toolCall?.id,
+          result: 'No search query provided. Please ask me a specific question.'
+        }]
+      });
+    }
+
+    console.log(`[VAPI WebSearch] Searching for: "${query}"`);
+
+    // Use Gemini with grounding for web search
+    if (USE_GEMINI && genAI) {
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.0-flash',
+        generationConfig: { maxOutputTokens: 300 }
+      });
+
+      const prompt = `Search the web and provide a brief, conversational answer to: "${query}"
+      
+      Keep your response to 2-3 sentences maximum. Speak naturally as if answering a friend.
+      Do not include URLs or citations. Just provide the information directly.`;
+
+      const result = await model.generateContent(prompt);
+      const response = result.response.text();
+
+      console.log(`[VAPI WebSearch] Response: "${response.substring(0, 100)}..."`);
+
+      return res.json({
+        results: [{
+          toolCallId: toolCall?.id,
+          result: response
+        }]
+      });
+    }
+
+    // Fallback to OpenAI if Gemini not available
+    const completion = await openai.chat.completions.create({
+      model: MODELS.SEARCH,
+      messages: [
+        { role: 'system', content: 'You are a helpful search assistant. Provide brief, conversational answers in 2-3 sentences. No URLs or citations.' },
+        { role: 'user', content: query }
+      ],
+      max_tokens: 200
+    });
+
+    const response = completion.choices[0]?.message?.content || 'I could not find information about that.';
+
+    return res.json({
+      results: [{
+        toolCallId: toolCall?.id,
+        result: response
+      }]
+    });
+
+  } catch (error) {
+    console.error('[VAPI WebSearch] Error:', error.message);
+    return res.json({
+      results: [{
+        toolCallId: req.body?.message?.toolCalls?.[0]?.id,
+        result: 'Sorry, I had trouble searching for that. Try asking again.'
+      }]
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`
