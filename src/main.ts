@@ -209,6 +209,11 @@ tavusStartBtn.addEventListener('click', async () => {
     videoEl.playsInline = true;
     tavusContainer.appendChild(videoEl);
 
+    // 2. Avatar Audio Element
+    const audioEl = document.createElement('audio');
+    audioEl.autoplay = true;
+    tavusContainer.appendChild(audioEl);
+
     // 2. Mute Button Overlay
     const muteBtn = document.createElement('button');
     muteBtn.innerHTML = `
@@ -259,27 +264,36 @@ tavusStartBtn.addEventListener('click', async () => {
       `;
     };
 
-    // Video Track Handling
+    // Track Handling
     const handleVideoTrack = (track: MediaStreamTrack) => {
       console.log('[Tavus] Video track received');
       videoEl.srcObject = new MediaStream([track]);
     };
 
+    const handleAudioTrack = (track: MediaStreamTrack) => {
+      console.log('[Tavus] Audio track received');
+      audioEl.srcObject = new MediaStream([track]);
+      audioEl.play().catch(e => console.error('[Tavus] Audio play failed', e));
+    };
+
     callFrame.on('participant-joined', (e: any) => {
-      if (!e.participant.local && e.participant.tracks?.video?.track) {
-        handleVideoTrack(e.participant.tracks.video.track);
+      if (!e.participant.local) {
+        if (e.participant.tracks?.video?.track) handleVideoTrack(e.participant.tracks.video.track);
+        if (e.participant.tracks?.audio?.track) handleAudioTrack(e.participant.tracks.audio.track);
       }
     });
 
     callFrame.on('participant-updated', (e: any) => {
-      if (!e.participant.local && e.participant.tracks?.video?.track) {
-        handleVideoTrack(e.participant.tracks.video.track);
+      if (!e.participant.local) {
+        if (e.participant.tracks?.video?.track) handleVideoTrack(e.participant.tracks.video.track);
+        if (e.participant.tracks?.audio?.track) handleAudioTrack(e.participant.tracks.audio.track);
       }
     });
 
     callFrame.on('track-started', (e: any) => {
-      if (!e.participant?.local && e.track.kind === 'video') {
-        handleVideoTrack(e.track);
+      if (!e.participant?.local) {
+        if (e.track.kind === 'video') handleVideoTrack(e.track);
+        if (e.track.kind === 'audio') handleAudioTrack(e.track);
       }
     });
 
