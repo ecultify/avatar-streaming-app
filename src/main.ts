@@ -196,7 +196,11 @@ tavusStartBtn.addEventListener('click', async () => {
         minHeight: '400px',
         border: '0',
         borderRadius: '12px'
-      }
+      },
+      videoSource: false,
+      dailyConfig: {
+        experimentalChromeVideoMuteLightOff: true
+      } as any
     });
 
     // Event Listeners for Tool Calls
@@ -257,7 +261,10 @@ tavusStartBtn.addEventListener('click', async () => {
       tavusContainer.innerHTML = '<p id="tavusPlaceholder" style="color: #666;">Session Ended. Click Start to reconnect.</p>';
     });
 
-    await callFrame.join({ url: conversationUrl });
+    await callFrame.join({
+      url: conversationUrl,
+      startVideoOff: true // Redundant but safe safeguard
+    });
 
     tavusStatus.textContent = 'Connected (Tavus)';
     tavusStopBtn.disabled = false;
