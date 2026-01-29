@@ -319,31 +319,50 @@ tavusStartBtn.addEventListener('click', async () => {
     callFrame.on('app-message', async (e: any) => {
       console.log('[Tavus] App Event:', e);
       const msg = e.data;
-      if (msg?.event_type === 'tool-call' && msg?.tool_name === 'web_search') {
-        console.log('[Tavus] Web Search Requested:', msg.args.query);
 
-        try {
-          const searchRes = await fetch(`${API_CONFIG.BACKEND_URL}/api/web-search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: msg.args.query })
-          });
-          const searchData = await searchRes.json();
-          const resultText = searchData.response || "No results found.";
+      // Handle Tavus tool call events (event_type: conversation.tool_call)
+      if (msg?.event_type === 'conversation.tool_call') {
+        const toolName = msg?.properties?.name;
+        const argsRaw = msg?.properties?.arguments;
 
-          callFrame.sendAppMessage({
-            event_type: 'tool-response',
-            tool_call_id: msg.tool_call_id,
-            result: resultText
-          });
-          console.log('[Tavus] Sent tool response');
-        } catch (err) {
-          console.error('[Tavus] Tool execution failed:', err);
-          callFrame.sendAppMessage({
-            event_type: 'tool-response',
-            tool_call_id: msg.tool_call_id,
-            error: "Failed to search web"
-          });
+        console.log('[Tavus] Tool Call Detected:', toolName, argsRaw);
+
+        if (toolName === 'web_search') {
+          try {
+            // Parse arguments (Tavus sends as JSON string)
+            const args = typeof argsRaw === 'string' ? JSON.parse(argsRaw) : argsRaw;
+            console.log('[Tavus] Web Search Query:', args?.query);
+
+            const searchRes = await fetch(`${API_CONFIG.BACKEND_URL}/api/web-search`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query: args?.query })
+            });
+            const searchData = await searchRes.json();
+            const resultText = searchData.response || "I couldn't find any results for that search.";
+
+            // Send result back using conversation.echo (makes replica speak the result)
+            callFrame.sendAppMessage({
+              message_type: 'conversation',
+              event_type: 'conversation.echo',
+              conversation_id: msg?.conversation_id,
+              properties: {
+                text: resultText
+              }
+            });
+            console.log('[Tavus] Sent echo response:', resultText.substring(0, 100) + '...');
+          } catch (err) {
+            console.error('[Tavus] Tool execution failed:', err);
+            // Send error message as echo
+            callFrame.sendAppMessage({
+              message_type: 'conversation',
+              event_type: 'conversation.echo',
+              conversation_id: msg?.conversation_id,
+              properties: {
+                text: "I'm sorry, I had trouble searching for that information. Please try again."
+              }
+            });
+          }
         }
       }
     });
