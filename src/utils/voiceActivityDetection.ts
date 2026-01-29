@@ -18,8 +18,16 @@ async function initializeRNNoise(): Promise<boolean> {
   if (rnnoiseInitialized) return true;
 
   try {
-    const rnnoise = await import('@jitsi/rnnoise-wasm');
-    rnnoiseModule = await rnnoise.default();
+    const rnnoise = await import('@jitsi/rnnoise-wasm') as any;
+    // Handle different export patterns
+    const init = rnnoise.default || rnnoise;
+    if (typeof init === 'function') {
+      rnnoiseModule = await init();
+    } else if (init && typeof init.default === 'function') {
+      rnnoiseModule = await init.default();
+    } else {
+      throw new Error('Could not find RNNoise initializer');
+    }
     rnnoiseState = rnnoiseModule.newState();
     rnnoiseInitialized = true;
     console.log('[RNNoise] Initialized successfully');
