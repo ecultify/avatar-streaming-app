@@ -5,6 +5,10 @@ import OpenAI from 'openai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import dns from 'dns';
+
+// FORCE IPv4 to settle Railway/Node timeouts
+dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config();
 
