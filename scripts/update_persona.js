@@ -1,28 +1,35 @@
 import fetch from 'node-fetch';
 
-const API_KEY = 'e8e1034569f047129d63defd4e2b4ca2';
-const PERSONA_ID = 'p760922fcb87';
+const API_KEY = '235de3bbab2146729f7e263dc26c9a65';
+const PERSONA_ID = 'pb0e49e1a085';
 
 async function updatePersona() {
     console.log('Updating Persona:', PERSONA_ID);
 
-    const tools = [
+    // Tavus API uses JSON Patch format (RFC 6902)
+    const patchOperations = [
         {
-            type: "function",
-            function: {
-                name: "web_search",
-                description: "Search the web for real-time information, news, or facts when you do not know the answer.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        query: {
-                            type: "string",
-                            description: "The search query to send to the search engine."
+            op: "add",
+            path: "/layers/llm/tools",
+            value: [
+                {
+                    type: "function",
+                    function: {
+                        name: "web_search",
+                        description: "Search the web for real-time information, news, or facts when you do not know the answer.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                query: {
+                                    type: "string",
+                                    description: "The search query to send to the search engine."
+                                }
+                            },
+                            required: ["query"]
                         }
-                    },
-                    required: ["query"]
+                    }
                 }
-            }
+            ]
         }
     ];
 
@@ -33,25 +40,20 @@ async function updatePersona() {
                 'Content-Type': 'application/json',
                 'x-api-key': API_KEY
             },
-            body: JSON.stringify({
-                layers: {
-                    llm: {
-                        tools: tools
-                    }
-                }
-            })
+            body: JSON.stringify(patchOperations)
         });
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Example Error: ${response.status} - ${errorText}`);
+            throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
-        console.log('Success! Persona Updated:', JSON.stringify(data, null, 2));
+        console.log('Success! Persona Updated.');
+        console.log('Tools configured:', JSON.stringify(data.layers?.llm?.tools, null, 2));
 
     } catch (error) {
-        console.error('Failed to update persona:', error);
+        console.error('Failed to update persona:', error.message);
     }
 }
 

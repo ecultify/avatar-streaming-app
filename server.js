@@ -674,22 +674,78 @@ app.post('/api/process-query', async (req, res) => {
   }
 });
 
+// Optimized web search for Tavus tool calls - skips classification for speed
 app.post('/api/web-search', async (req, res) => {
-  const { query, sessionId = 'legacy' } = req.body;
+  const startTime = Date.now();
+  const { query, sessionId = 'tavus' } = req.body;
 
-  if (!query) {
+  if (!query?.trim()) {
     return res.status(400).json({ error: 'Query is required' });
   }
 
-  req.body.transcript = query;
-  req.body.sessionId = sessionId;
+  console.log(`[WebSearch] Direct search: "${query}"`);
 
-  return app._router.handle(req, res, () => { });
+  try {
+    let response;
+
+    // Use Gemini with Google Search grounding (fastest for real-time data)
+    if (USE_GEMINI && genAI) {
+      const searchModel = genAI.getGenerativeModel({
+        model: MODELS.GEMINI_SEARCH,
+        tools: [{ googleSearch: {} }],
+        generationConfig: {
+          maxOutputTokens: 150, // Shorter for faster response
+          temperature: 0.5,
+        }
+      });
+
+      const result = await searchModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: query }] }],
+        systemInstruction: `You are a helpful voice assistant. Answer the user's question using the web search results.
+Keep your response SHORT (2-3 sentences max) and conversational - this will be spoken aloud.
+Focus on the most relevant, up-to-date information. Do not include URLs or citations.`,
+      });
+
+      response = result.response.text();
+      console.log(`[WebSearch] Gemini response in ${Date.now() - startTime}ms`);
+    }
+    // OpenAI fallback
+    else {
+      const searchResponse = await openai.responses.create({
+        model: MODELS.SEARCH,
+        input: query,
+        tools: [{ type: "web_search" }],
+        instructions: WEB_SEARCH_PROMPT,
+      });
+      response = extractTextFromResponse(searchResponse);
+      console.log(`[WebSearch] OpenAI response in ${Date.now() - startTime}ms`);
+    }
+
+    // Clean for voice output
+    response = sanitizeForVoice(response);
+    response = truncateForVoice(response, 2); // Even shorter for Tavus
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[WebSearch] ✓ ${elapsed}ms: "${response.substring(0, 80)}..."`);
+
+    res.json({
+      response,
+      processingTime: elapsed,
+      source: USE_GEMINI ? 'gemini' : 'openai'
+    });
+
+  } catch (error) {
+    console.error('[WebSearch] Error:', error.message);
+    res.status(500).json({
+      error: 'Search failed',
+      response: "I'm sorry, I couldn't search for that right now. Please try again."
+    });
+  }
 });
 
 // --- Tavus API Integration ---
 const TAVUS_API_KEY = process.env.TAVUS_API_KEY;
-const TAVUS_PERSONA_ID = "p760922fcb87"; // Default Persona ID
+const TAVUS_PERSONA_ID = "pb0e49e1a085"; // Default Persona ID
 
 app.post('/api/tavus/session', async (req, res) => {
   const { personaId } = req.body;
