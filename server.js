@@ -689,7 +689,7 @@ app.post('/api/web-search', async (req, res) => {
 
 // --- Tavus API Integration ---
 const TAVUS_API_KEY = process.env.TAVUS_API_KEY;
-const TAVUS_PERSONA_ID = "p653f3322131"; // Default Persona ID
+const TAVUS_PERSONA_ID = "p760922fcb87"; // Default Persona ID
 
 app.post('/api/tavus/session', async (req, res) => {
   const { personaId } = req.body;
