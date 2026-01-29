@@ -479,21 +479,28 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
 async function startVoiceChatWithVAD() {
   if (!avatar) return;
 
+  // VAPI-style interruption settings
+  const MIN_INTERRUPT_AUDIO_SIZE = 30000; // ~0.9 sec at 16kHz - require substantial speech to interrupt
+  const MIN_NORMAL_AUDIO_SIZE = 5000;     // ~0.15 sec for normal listening
+  let speechStartTime = 0;
+
   try {
     updateHeyGenStatus('Starting voice mode with VAD...');
     isVoiceModeActive = true;
 
     await initializeVAD({
       onSpeechStart: () => {
-        // Interrupt if avatar is speaking
+        speechStartTime = Date.now();
+
+        // If avatar is speaking, just note it - don't interrupt yet
+        // We'll decide on interrupt when speech ends based on duration
         if (isAvatarSpeaking) {
-          console.log('[VAD] Interrupting avatar...');
-          isAvatarSpeaking = false;
+          console.log('[VAD] Potential interruption detected...');
         }
 
         if (!isProcessingAudio) {
           isRecording = true;
-          voiceStatus.textContent = 'Listening... (speech detected)';
+          voiceStatus.textContent = isAvatarSpeaking ? 'Listening... (speak to interrupt)' : 'Listening... (speech detected)';
           stopSpeakingBtn.style.display = 'block';
           console.log('[VAD] Speech started');
         }
@@ -502,8 +509,34 @@ async function startVoiceChatWithVAD() {
         isRecording = false;
         stopSpeakingBtn.style.display = 'none';
 
-        if (!isVoiceModeActive || isAvatarSpeaking || isProcessingAudio) {
-          console.log('[VAD] Ignoring - busy');
+        const speechDuration = Date.now() - speechStartTime;
+        const wasAvatarSpeaking = isAvatarSpeaking;
+
+        // If avatar was speaking, check if this is a real interruption
+        if (wasAvatarSpeaking) {
+          // Require minimum audio size to count as real interruption
+          // This filters out background noise, self-echo, and short sounds
+          if (audioBlob.size < MIN_INTERRUPT_AUDIO_SIZE) {
+            console.log(`[VAD] Ignoring short sound during TTS (${audioBlob.size} bytes, ${speechDuration}ms)`);
+            voiceStatus.textContent = 'Avatar speaking...';
+            return;
+          }
+
+          // Real interruption detected!
+          console.log(`[VAD] Interrupting avatar! (${audioBlob.size} bytes, ${speechDuration}ms)`);
+          isAvatarSpeaking = false;
+          // Note: HeyGen avatar.interrupt() can be called here if available
+        }
+
+        // If busy processing another request, ignore
+        if (!isVoiceModeActive || isProcessingAudio) {
+          console.log('[VAD] Ignoring - busy processing');
+          return;
+        }
+
+        // For normal speech (not interruption), use lower threshold
+        if (!wasAvatarSpeaking && audioBlob.size < MIN_NORMAL_AUDIO_SIZE) {
+          console.log(`[VAD] Audio too short (${audioBlob.size} bytes)`);
           return;
         }
 
@@ -512,7 +545,9 @@ async function startVoiceChatWithVAD() {
       },
       onVADMisfire: () => {
         console.log('[VAD] Noise filtered');
-        voiceStatus.textContent = 'Listening... (noise filtered)';
+        if (!isAvatarSpeaking) {
+          voiceStatus.textContent = 'Listening... (noise filtered)';
+        }
       }
     });
 
