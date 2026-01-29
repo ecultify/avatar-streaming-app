@@ -558,6 +558,47 @@ async function startVoiceChatWithVAD() {
     // The HeyGen avatar will provide the voice
     voiceAgent.setMuted(false); // User mic is NOT muted
 
+    // IMPORTANT: Mute all audio elements created by VAPI
+    // VAPI creates audio elements to play assistant voice - we need to silence them
+    const muteVapiAudio = () => {
+      document.querySelectorAll('audio').forEach((audio: HTMLAudioElement) => {
+        // Don't mute the HeyGen video audio
+        if (!audio.closest('#heygenVideo') && !audio.id?.includes('heygen')) {
+          audio.volume = 0;
+          audio.muted = true;
+          console.log('[Voice] Muted VAPI audio element');
+        }
+      });
+    };
+
+    // Mute existing audio elements
+    muteVapiAudio();
+
+    // Watch for new audio elements created by VAPI
+    const audioObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof HTMLAudioElement) {
+            node.volume = 0;
+            node.muted = true;
+            console.log('[Voice] Muted new VAPI audio element');
+          }
+          // Check children too
+          if (node instanceof HTMLElement) {
+            node.querySelectorAll('audio').forEach((audio: HTMLAudioElement) => {
+              audio.volume = 0;
+              audio.muted = true;
+            });
+          }
+        });
+      });
+    });
+
+    audioObserver.observe(document.body, { childList: true, subtree: true });
+
+    // Store observer for cleanup later
+    (window as any).__vapiAudioObserver = audioObserver;
+
     voiceStatus.textContent = 'Listening... (speak anytime)';
     updateHeyGenStatus('Voice mode active');
     console.log('[Voice] Voice mode started successfully');
