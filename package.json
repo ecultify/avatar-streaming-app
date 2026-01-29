@@ -20,6 +20,7 @@
     "@heygen/streaming-avatar": "^2.1.0",
     "@jitsi/rnnoise-wasm": "^0.2.1",
     "@ricky0123/vad-web": "^0.0.29",
+    "@vapi-ai/web": "^2.5.2",
     "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

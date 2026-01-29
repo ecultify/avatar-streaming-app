@@ -6,6 +6,13 @@ import StreamingAvatar, {
 } from '@heygen/streaming-avatar'
 import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './utils/voiceActivityDetection'
 import { API_CONFIG, AVATAR_CONFIG } from './config'
+import Vapi from '@vapi-ai/web'
+
+// Voice Agent Configuration
+const VOICE_PUBLIC_KEY = import.meta.env.VITE_VOICE_PUBLIC_KEY || '';
+const VOICE_AGENT_ID = import.meta.env.VITE_VOICE_AGENT_ID || '';
+let voiceAgent: Vapi | null = null;
+let voiceAgentActive = false;
 
 const HEYGEN_API_TOKEN = import.meta.env.VITE_HEYGEN_API_KEY || '';
 
@@ -479,89 +486,87 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
 async function startVoiceChatWithVAD() {
   if (!avatar) return;
 
-  // VAPI-style interruption settings
-  const MIN_INTERRUPT_AUDIO_SIZE = 30000; // ~0.9 sec at 16kHz - require substantial speech to interrupt
-  const MIN_NORMAL_AUDIO_SIZE = 5000;     // ~0.15 sec for normal listening
-  let speechStartTime = 0;
-
   try {
-    updateHeyGenStatus('Starting voice mode with VAD...');
+    updateHeyGenStatus('Starting voice mode...');
     isVoiceModeActive = true;
 
-    await initializeVAD({
-      onSpeechStart: () => {
-        speechStartTime = Date.now();
+    // Initialize voice agent if not already done
+    if (!voiceAgent) {
+      console.log('[Voice] Initializing voice agent...');
+      voiceAgent = new Vapi(VOICE_PUBLIC_KEY);
 
-        // If avatar is speaking, just note it - don't interrupt yet
-        // We'll decide on interrupt when speech ends based on duration
-        if (isAvatarSpeaking) {
-          console.log('[VAD] Potential interruption detected...');
-        }
-
-        if (!isProcessingAudio) {
-          isRecording = true;
-          voiceStatus.textContent = isAvatarSpeaking ? 'Listening... (speak to interrupt)' : 'Listening... (speech detected)';
-          stopSpeakingBtn.style.display = 'block';
-          console.log('[VAD] Speech started');
-        }
-      },
-      onSpeechEnd: async (audioBlob: Blob) => {
-        isRecording = false;
-        stopSpeakingBtn.style.display = 'none';
-
-        const speechDuration = Date.now() - speechStartTime;
-        const wasAvatarSpeaking = isAvatarSpeaking;
-
-        // If avatar was speaking, check if this is a real interruption
-        if (wasAvatarSpeaking) {
-          // Require minimum audio size to count as real interruption
-          // This filters out background noise, self-echo, and short sounds
-          if (audioBlob.size < MIN_INTERRUPT_AUDIO_SIZE) {
-            console.log(`[VAD] Ignoring short sound during TTS (${audioBlob.size} bytes, ${speechDuration}ms)`);
+      // Handle agent messages - capture assistant transcripts
+      voiceAgent.on('message', (message: any) => {
+        // When assistant speaks, send the transcript to HeyGen avatar
+        if (message.type === 'transcript' && message.role === 'assistant' && message.transcriptType === 'final') {
+          const text = message.transcript;
+          if (text && avatar && !isAvatarSpeaking) {
+            console.log(`${ts()} [Voice] Assistant response: "${text.substring(0, 50)}..."`);
+            isAvatarSpeaking = true;
             voiceStatus.textContent = 'Avatar speaking...';
-            return;
+
+            // Send to HeyGen avatar
+            avatar.speak({
+              text: text,
+              taskType: TaskType.REPEAT
+            }).then(() => {
+              console.log(`${ts()} [Voice] Avatar finished speaking`);
+              isAvatarSpeaking = false;
+              voiceStatus.textContent = 'Listening... (speak anytime)';
+            }).catch((err: any) => {
+              console.error('[Voice] Avatar speak error:', err);
+              isAvatarSpeaking = false;
+            });
           }
-
-          // Real interruption detected!
-          console.log(`[VAD] Interrupting avatar! (${audioBlob.size} bytes, ${speechDuration}ms)`);
-          isAvatarSpeaking = false;
-          // Note: HeyGen avatar.interrupt() can be called here if available
         }
 
-        // If busy processing another request, ignore
-        if (!isVoiceModeActive || isProcessingAudio) {
-          console.log('[VAD] Ignoring - busy processing');
-          return;
+        // Show when user is speaking
+        if (message.type === 'transcript' && message.role === 'user') {
+          voiceStatus.textContent = 'You: ' + (message.transcript || '').substring(0, 30) + '...';
         }
+      });
 
-        // For normal speech (not interruption), use lower threshold
-        if (!wasAvatarSpeaking && audioBlob.size < MIN_NORMAL_AUDIO_SIZE) {
-          console.log(`[VAD] Audio too short (${audioBlob.size} bytes)`);
-          return;
-        }
+      // Handle call events
+      voiceAgent.on('call-start', () => {
+        console.log('[Voice] Call started');
+        voiceStatus.textContent = 'Listening... (speak anytime)';
+        voiceAgentActive = true;
+      });
 
-        console.log('[VAD] Speech ended, size:', audioBlob.size);
-        await processUserSpeech(audioBlob);
-      },
-      onVADMisfire: () => {
-        console.log('[VAD] Noise filtered');
-        if (!isAvatarSpeaking) {
-          voiceStatus.textContent = 'Listening... (noise filtered)';
-        }
-      }
-    });
+      voiceAgent.on('call-end', () => {
+        console.log('[Voice] Call ended');
+        voiceAgentActive = false;
+        voiceStatus.textContent = 'Voice mode ended';
+      });
 
-    vadInitialized = true;
-    startVAD();
+      voiceAgent.on('speech-start', () => {
+        // Agent is about to speak - we'll mute agent audio and use HeyGen instead
+        console.log('[Voice] Agent speaking (audio muted, using avatar)');
+      });
+
+      voiceAgent.on('error', (error: any) => {
+        console.error('[Voice] Error:', error);
+        voiceStatus.textContent = 'Voice error - try again';
+      });
+    }
+
+    // Start the voice call with the agent (audio output will be muted)
+    console.log('[Voice] Starting call with agent:', VOICE_AGENT_ID);
+    await voiceAgent.start(VOICE_AGENT_ID);
+
+    // Mute the agent's audio output - we only want the text transcripts
+    // The HeyGen avatar will provide the voice
+    voiceAgent.setMuted(false); // User mic is NOT muted
+
     voiceStatus.textContent = 'Listening... (speak anytime)';
-    updateHeyGenStatus('Voice mode active with VAD');
-    console.log('[VAD] Voice mode started');
+    updateHeyGenStatus('Voice mode active');
+    console.log('[Voice] Voice mode started successfully');
 
   } catch (error) {
-    console.error('[VAD] Failed:', error);
-    updateHeyGenStatus('VAD failed, using fallback...');
-    useFallbackRecording = true;
-    await startVoiceChatFallback();
+    console.error('[Voice] Failed to start:', error);
+    updateHeyGenStatus('Voice mode failed');
+    voiceStatus.textContent = 'Voice mode error';
+    isVoiceModeActive = false;
   }
 }
 
@@ -715,6 +720,17 @@ async function switchMode(mode: 'text' | 'voice') {
       pauseVAD();
     }
 
+    // Stop voice agent call if active
+    if (voiceAgent && voiceAgentActive) {
+      try {
+        voiceAgent.stop();
+        voiceAgentActive = false;
+        console.log('[Voice] Agent call stopped');
+      } catch (e) {
+        console.error('[Voice] Error stopping agent:', e);
+      }
+    }
+
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
         mediaRecorder.stop();
@@ -756,6 +772,17 @@ async function stopAvatarSession() {
 
     destroyVAD();
     vadInitialized = false;
+
+    // Stop voice agent
+    if (voiceAgent) {
+      try {
+        voiceAgent.stop();
+        voiceAgentActive = false;
+        console.log('[Voice] Agent call stopped');
+      } catch (e) {
+        console.error('[Voice] Error stopping agent:', e);
+      }
+    }
 
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
       try {
