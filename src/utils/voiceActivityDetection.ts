@@ -15,11 +15,17 @@ let rnnoiseModule: any = null;
 let rnnoiseState: any = null;
 
 async function initializeRNNoise(): Promise<boolean> {
-  if (rnnoiseInitialized) return true;
+  // NOTE: RNNoise disabled - @jitsi/rnnoise-wasm requires AudioWorklet setup
+  // which is complex to integrate. Gemini handles noisy audio well.
+  // This can be re-enabled with proper AudioWorklet integration later.
+  console.log('[RNNoise] Disabled - using raw audio (Gemini handles noise well)');
+  return false;
 
+  // Original code kept for reference:
+  /*
+  if (rnnoiseInitialized) return true;
   try {
     const rnnoise = await import('@jitsi/rnnoise-wasm') as any;
-    // Handle different export patterns
     const init = rnnoise.default || rnnoise;
     if (typeof init === 'function') {
       rnnoiseModule = await init();
@@ -33,9 +39,10 @@ async function initializeRNNoise(): Promise<boolean> {
     console.log('[RNNoise] Initialized successfully');
     return true;
   } catch (error) {
-    console.warn('[RNNoise] Failed to initialize, continuing without noise suppression:', error);
+    console.warn('[RNNoise] Failed to initialize:', error);
     return false;
   }
+  */
 }
 
 function applyNoiseSuppression(audioData: Float32Array): Float32Array {
