@@ -183,10 +183,11 @@ async function initializeAvatarSession() {
       isAvatarSpeaking = true
     })
     avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
-      voiceStatus.textContent = 'Waiting for you to speak...'
-      isAvatarSpeaking = false
+      console.log(`${ts()} [HeyGen] Avatar stopped talking event`);
+      voiceStatus.textContent = 'Listening... (speak anytime)';
+      isAvatarSpeaking = false;
       if (isVoiceModeActive && vadInitialized) {
-        resumeVAD()
+        resumeVAD(); // Legacy VAD support
       }
     })
 
@@ -279,6 +280,9 @@ let isAvatarSpeaking = false
 let isProcessingAudio = false
 let vadInitialized = false
 let useFallbackRecording = false
+// New variables for streaming text
+let assistantTranscriptCursor = 0;
+let currentTurnTranscript = '';
 
 const MIN_AUDIO_SIZE = 5000;
 const MIN_TRANSCRIPT_LENGTH = 2;
@@ -376,7 +380,7 @@ const USE_UNIFIED_PROCESSING = true;
 
 
 async function processUserSpeech(audioBlob: Blob): Promise<void> {
-  if (isProcessingAudio || isAvatarSpeaking) {
+  if (isProcessingAudio) { // Removed isAvatarSpeaking check to allow full duplex interruption
     console.log(`${ts()} [Voice] Busy, ignoring audio`);
     return;
   }
@@ -496,27 +500,60 @@ async function startVoiceChatWithVAD() {
       voiceAgent = new Vapi(VOICE_PUBLIC_KEY);
 
       // Handle agent messages - capture assistant transcripts
+      // Handle agent messages - capture assistant transcripts
       voiceAgent.on('message', (message: any) => {
-        // When assistant speaks, send the transcript to HeyGen avatar
-        if (message.type === 'transcript' && message.role === 'assistant' && message.transcriptType === 'final') {
+        // Handle assistant transcripts (streaming)
+        if (message.type === 'transcript' && message.role === 'assistant') {
           const text = message.transcript;
-          if (text && avatar && !isAvatarSpeaking) {
-            console.log(`${ts()} [Voice] Assistant response: "${text.substring(0, 50)}..."`);
-            isAvatarSpeaking = true;
-            voiceStatus.textContent = 'Avatar speaking...';
 
-            // Send to HeyGen avatar
-            avatar.speak({
-              text: text,
-              taskType: TaskType.REPEAT
-            }).then(() => {
-              console.log(`${ts()} [Voice] Avatar finished speaking`);
-              isAvatarSpeaking = false;
-              voiceStatus.textContent = 'Listening... (speak anytime)';
-            }).catch((err: any) => {
-              console.error('[Voice] Avatar speak error:', err);
-              isAvatarSpeaking = false;
-            });
+          // Reset cursor if we detect a new turn (text is shorter than cursor or doesn't match)
+          if (text.length < assistantTranscriptCursor || !text.startsWith(currentTurnTranscript.substring(0, assistantTranscriptCursor))) {
+            assistantTranscriptCursor = 0;
+            currentTurnTranscript = '';
+          }
+
+          currentTurnTranscript = text;
+
+          // Determine the new chunk to process
+          const newContent = text.substring(assistantTranscriptCursor);
+
+          // Find the last sentence boundary in the new content
+          // We look for punctuation followed by space or end of string
+          // But for "partial" transcripts, we only want to speak if we are sure it's a sentence end (followed by space usually)
+          // Exception: "final" transcript means we speak everything remaining.
+
+          let speakUntilIndex = -1;
+
+          if (message.transcriptType === 'final') {
+            speakUntilIndex = newContent.length;
+          } else {
+            // For partials, look for safe sentence breaks
+            const sentenceBreakRegex = /[.!?]+[\s\n]+/g;
+            let match;
+            while ((match = sentenceBreakRegex.exec(newContent)) !== null) {
+              speakUntilIndex = match.index + match[0].length;
+            }
+          }
+
+          if (speakUntilIndex > 0) {
+            const textToSpeak = newContent.substring(0, speakUntilIndex).trim();
+            if (textToSpeak && avatar) {
+              console.log(`${ts()} [Voice] Streaming to Avatar: "${textToSpeak.substring(0, 30)}..."`);
+
+              if (!isAvatarSpeaking) {
+                isAvatarSpeaking = true;
+                voiceStatus.textContent = 'Avatar speaking...';
+              }
+
+              avatar.speak({
+                text: textToSpeak,
+                taskType: TaskType.REPEAT
+              }).catch((err: any) => {
+                console.error('[Voice] Avatar speak error:', err);
+              });
+
+              assistantTranscriptCursor += speakUntilIndex; // Advance cursor
+            }
           }
         }
 
@@ -541,7 +578,9 @@ async function startVoiceChatWithVAD() {
 
       voiceAgent.on('speech-start', () => {
         // Agent is about to speak - we'll mute agent audio and use HeyGen instead
-        console.log('[Voice] Agent speaking (audio muted, using avatar)');
+        console.log('[Voice] Agent speaking start (resetting stream cursor)');
+        assistantTranscriptCursor = 0;
+        currentTurnTranscript = '';
       });
 
       voiceAgent.on('error', (error: any) => {
@@ -552,7 +591,17 @@ async function startVoiceChatWithVAD() {
 
     // Start the voice call with the agent (audio output will be muted)
     console.log('[Voice] Starting call with agent:', VOICE_AGENT_ID);
-    await voiceAgent.start(VOICE_AGENT_ID);
+    // Start the voice call with the agent (audio output will be muted)
+    console.log('[Voice] Starting call with agent (tuned VAD):', VOICE_AGENT_ID);
+    // VAD Tuning: We can pass assistant overrides here.
+    // For Deepgram (default), increasing 'endpointing' helps with cut-offs (default is often too short).
+    // We try to set a safer default if the provider is Deepgram, but wrap it carefully.
+    await voiceAgent.start(VOICE_AGENT_ID, {
+      transcriber: {
+        provider: 'deepgram',
+        endpointing: 300, // 300ms silence before processing (vs default ~10ms which is aggressive)
+      }
+    });
 
     // Mute the agent's audio output - we only want the text transcripts
     // The HeyGen avatar will provide the voice

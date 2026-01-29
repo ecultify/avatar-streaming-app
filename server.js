@@ -708,6 +708,7 @@ app.post('/api/vapi-websearch', async (req, res) => {
     if (USE_GEMINI && genAI) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.0-flash',
+        tools: [{ googleSearch: {} }], // Enable Google Search grounding
         generationConfig: { maxOutputTokens: 300 }
       });
 
