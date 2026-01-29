@@ -188,39 +188,104 @@ tavusStartBtn.addEventListener('click', async () => {
     // Clear placeholder
     tavusContainer.innerHTML = '';
 
-    callFrame = DailyIframe.createFrame(tavusContainer, {
-      showLeaveButton: true,
-      iframeStyle: {
-        width: '100%',
-        height: '100%',
-        minHeight: '400px',
-        border: '0',
-        borderRadius: '12px'
-      },
-      videoSource: false,
+    callFrame = DailyIframe.createCallObject({
+      videoSource: false, // Disable user's camera completely
+      audioSource: true,  // Keep microphone enabled
       dailyConfig: {
         experimentalChromeVideoMuteLightOff: true
       } as any
     });
 
+    // Custom UI Elements
+    tavusContainer.style.position = 'relative';
+    tavusContainer.style.overflow = 'hidden';
+
+    // 1. Avatar Video Element
+    const videoEl = document.createElement('video');
+    videoEl.style.width = '100%';
+    videoEl.style.height = '100%';
+    videoEl.style.objectFit = 'cover';
+    videoEl.autoplay = true;
+    videoEl.playsInline = true;
+    tavusContainer.appendChild(videoEl);
+
+    // 2. Mute Button Overlay
+    const muteBtn = document.createElement('button');
+    muteBtn.innerHTML = `
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    `;
+    muteBtn.style.position = 'absolute';
+    muteBtn.style.bottom = '20px';
+    muteBtn.style.left = '50%';
+    muteBtn.style.transform = 'translateX(-50%)';
+    muteBtn.style.width = '56px';
+    muteBtn.style.height = '56px';
+    muteBtn.style.borderRadius = '50%';
+    muteBtn.style.border = 'none';
+    muteBtn.style.backgroundColor = 'rgba(255,255,255,0.2)';
+    muteBtn.style.color = 'white';
+    muteBtn.style.cursor = 'pointer';
+    muteBtn.style.display = 'flex';
+    muteBtn.style.alignItems = 'center';
+    muteBtn.style.justifyContent = 'center';
+    muteBtn.style.backdropFilter = 'blur(10px)';
+    tavusContainer.appendChild(muteBtn);
+
+    let isMuted = false;
+    muteBtn.onclick = () => {
+      isMuted = !isMuted;
+      callFrame.setLocalAudio(!isMuted);
+      muteBtn.style.backgroundColor = isMuted ? '#ef4444' : 'rgba(255,255,255,0.2)';
+      muteBtn.innerHTML = isMuted ? `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="1" y1="1" x2="23" y2="23"/>
+          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      ` : `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      `;
+    };
+
+    // Video Track Handling
+    const handleVideoTrack = (track: MediaStreamTrack) => {
+      console.log('[Tavus] Video track received');
+      videoEl.srcObject = new MediaStream([track]);
+    };
+
+    callFrame.on('participant-joined', (e: any) => {
+      if (!e.participant.local && e.participant.tracks?.video?.track) {
+        handleVideoTrack(e.participant.tracks.video.track);
+      }
+    });
+
+    callFrame.on('participant-updated', (e: any) => {
+      if (!e.participant.local && e.participant.tracks?.video?.track) {
+        handleVideoTrack(e.participant.tracks.video.track);
+      }
+    });
+
+    callFrame.on('track-started', (e: any) => {
+      if (!e.participant?.local && e.track.kind === 'video') {
+        handleVideoTrack(e.track);
+      }
+    });
+
     // Event Listeners for Tool Calls
     callFrame.on('app-message', async (e: any) => {
       console.log('[Tavus] App Event:', e);
-      // Tavus sends tool calls as app-message
-      // Structure might vary, log it first.
-      // As per Tavus docs, it looks for specific event structure.
-      // But usually "app-message" carries the payload.
-
-      // Expected payload from Tavus for tool call might be wrapped.
-      // Let's assume standard Daily app-message for now.
-      /*
-         e.data: {
-             event_type: "tool-call",
-             tool_name: "web_search",
-             tool_call_id: "...",
-             args: { query: "..." }
-         }
-     */
       const msg = e.data;
       if (msg?.event_type === 'tool-call' && msg?.tool_name === 'web_search') {
         console.log('[Tavus] Web Search Requested:', msg.args.query);
@@ -234,7 +299,6 @@ tavusStartBtn.addEventListener('click', async () => {
           const searchData = await searchRes.json();
           const resultText = searchData.response || "No results found.";
 
-          // Send result back
           callFrame.sendAppMessage({
             event_type: 'tool-response',
             tool_call_id: msg.tool_call_id,
@@ -263,10 +327,10 @@ tavusStartBtn.addEventListener('click', async () => {
 
     await callFrame.join({
       url: conversationUrl,
-      startVideoOff: true // Redundant but safe safeguard
+      startVideoOff: true
     });
 
-    tavusStatus.textContent = 'Connected (Tavus)';
+    tavusStatus.textContent = 'Connected (Minimal UI)';
     tavusStopBtn.disabled = false;
 
   } catch (err: any) {
