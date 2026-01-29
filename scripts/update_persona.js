@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 
 const API_KEY = 'e8e1034569f047129d63defd4e2b4ca2';
-const PERSONA_ID = 'p653f3322131';
+const PERSONA_ID = 'p760922fcb87';
 
 async function updatePersona() {
     console.log('Updating Persona:', PERSONA_ID);
@@ -27,7 +27,7 @@ async function updatePersona() {
     ];
 
     try {
-        const response = await fetch(`https://api.tavus.io/v2/personas/${PERSONA_ID}`, {
+        const response = await fetch(`https://tavusapi.com/v2/personas/${PERSONA_ID}`, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',

@@ -265,15 +265,33 @@ tavusStartBtn.addEventListener('click', async () => {
     };
 
     // Track Handling
+    let currentAudioTrackId: string | null = null;
+
     const handleVideoTrack = (track: MediaStreamTrack) => {
       console.log('[Tavus] Video track received');
       videoEl.srcObject = new MediaStream([track]);
     };
 
     const handleAudioTrack = (track: MediaStreamTrack) => {
-      console.log('[Tavus] Audio track received');
+      // Prevent duplicate handling of the same track
+      if (currentAudioTrackId === track.id) {
+        console.log('[Tavus] Same audio track, skipping');
+        return;
+      }
+      currentAudioTrackId = track.id;
+
+      console.log('[Tavus] Audio track received:', track.id);
       audioEl.srcObject = new MediaStream([track]);
-      audioEl.play().catch(e => console.error('[Tavus] Audio play failed', e));
+
+      // Small delay to allow previous play() to settle
+      setTimeout(() => {
+        audioEl.play().catch(e => {
+          // Only log if it's not an abort error (which is expected during rapid updates)
+          if (e.name !== 'AbortError') {
+            console.error('[Tavus] Audio play failed', e);
+          }
+        });
+      }, 100);
     };
 
     callFrame.on('participant-joined', (e: any) => {
