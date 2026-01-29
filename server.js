@@ -406,6 +406,7 @@ app.post('/api/process-audio', upload.single('file'), async (req, res) => {
         file: fs.createReadStream(newPath),
         model: MODELS.TRANSCRIPTION,
         response_format: "text",
+        response_format: "text",
       });
 
       try { fs.unlinkSync(newPath); } catch (e) { }
@@ -654,6 +655,7 @@ app.post('/api/process-query', async (req, res) => {
       response: cleanResponse,
       queryType: classification.type,
       processingTime,
+      processingTime,
       sessionId,
     });
 
@@ -693,6 +695,10 @@ app.post('/api/tavus/session', async (req, res) => {
     return res.status(500).json({ error: 'Tavus API Key not configured on server.' });
   }
 
+  // Use AbortController for timeout (30s)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   try {
     console.log(`[Tavus] Creating conversation for persona: ${targetPersona}...`);
 
@@ -705,8 +711,11 @@ app.post('/api/tavus/session', async (req, res) => {
       body: JSON.stringify({
         persona_id: targetPersona,
         replica_id: "r4317e64d25a",
-      })
+      }),
+      signal: controller.signal
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errText = await response.text();
@@ -719,8 +728,21 @@ app.post('/api/tavus/session', async (req, res) => {
 
     res.json(data);
   } catch (error) {
-    console.error('[Tavus] Failed to create session:', error);
-    res.status(500).json({ error: error.message });
+    clearTimeout(timeoutId);
+    console.error('[Tavus] Request Failed:', error);
+
+    // Handle Timeouts specifically
+    if (error.name === 'AbortError' || (error.cause && error.cause.code === 'UND_ERR_CONNECT_TIMEOUT')) {
+      return res.status(504).json({
+        error: 'Connection to Tavus API timed out.',
+        suggestion: 'Please try again. If on Railway, this might be a temporary egress issue.'
+      });
+    }
+
+    res.status(500).json({
+      error: 'Failed to create Tavus session',
+      details: error.message
+    });
   }
 });
 
