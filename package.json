@@ -16,6 +16,7 @@
     "postinstall": "npm run build"
   },
   "dependencies": {
+    "@daily-co/daily-js": "^0.86.0",
     "@google/generative-ai": "^0.24.1",
     "@heygen/streaming-avatar": "^2.1.0",
     "@jitsi/rnnoise-wasm": "^0.2.1",

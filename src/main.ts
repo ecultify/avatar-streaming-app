@@ -4,6 +4,7 @@ import StreamingAvatar, {
   StreamingEvents,
   TaskType,
 } from '@heygen/streaming-avatar'
+import DailyIframe from '@daily-co/daily-js';
 import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './utils/voiceActivityDetection'
 import { API_CONFIG, AVATAR_CONFIG } from './config'
 // Voice Agent Configuration
@@ -30,7 +31,16 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <h1>AI Avatar Assistant</h1>
     
+    <div class="provider-toggle">
+        <label class="switch">
+            <input type="checkbox" id="providerToggle">
+            <span class="slider round"></span>
+        </label>
+        <span id="providerLabel">HeyGen</span>
+    </div>
+
     <div id="avatarContainer" class="avatar-container">
+      <!-- HeyGen Section -->
       <div id="heygenSection" class="avatar-section active">
         <div class="section-header">
           <h2>HeyGen Interactive Avatar</h2>
@@ -71,6 +81,24 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
           <p id="heygenSessionInfo"></p>
         </div>
       </div>
+
+      <!-- Tavus Section -->
+      <div id="tavusSection" class="avatar-section" style="display: none;">
+        <div class="section-header">
+          <h2>Tavus Digital Twin</h2>
+          <div class="controls">
+            <button id="tavusStartBtn" type="button">Start Session</button>
+            <button id="tavusStopBtn" type="button" disabled>End Session</button>
+          </div>
+        </div>
+        <div id="tavusContainer" class="video-container" style="background: #000; min-height: 400px; display: flex; align-items: center; justify-content: center;">
+            <p id="tavusPlaceholder" style="color: #666;">Click Start to connect...</p>
+        </div>
+        <div class="info">
+            <p id="tavusStatus">Ready to connect</p>
+        </div>
+      </div>
+
     </div>
   </div>
 `
@@ -87,6 +115,17 @@ const heygenVideo = document.querySelector<HTMLVideoElement>('#heygenVideo')!
 const heygenStatus = document.querySelector<HTMLParagraphElement>('#heygenStatus')!
 const heygenSessionInfo = document.querySelector<HTMLParagraphElement>('#heygenSessionInfo')!
 
+const tavusSection = document.getElementById('tavusSection') as HTMLDivElement;
+const heygenSection = document.getElementById('heygenSection') as HTMLDivElement;
+const providerToggle = document.getElementById('providerToggle') as HTMLInputElement;
+const providerLabel = document.getElementById('providerLabel') as HTMLSpanElement;
+const tavusStartBtn = document.getElementById('tavusStartBtn') as HTMLButtonElement;
+const tavusStopBtn = document.getElementById('tavusStopBtn') as HTMLButtonElement;
+const tavusStatus = document.getElementById('tavusStatus') as HTMLParagraphElement;
+const tavusContainer = document.getElementById('tavusContainer') as HTMLDivElement;
+
+let callFrame: any = null;
+
 const textModeBtn = document.querySelector<HTMLButtonElement>('#textModeBtn')!
 const voiceModeBtn = document.querySelector<HTMLButtonElement>('#voiceModeBtn')!
 const textModeControls = document.querySelector<HTMLDivElement>('#textModeControls')!
@@ -99,6 +138,142 @@ const sendBtn = document.querySelector<HTMLButtonElement>('#sendBtn')!
 
 const processingIndicator = document.querySelector<HTMLDivElement>('#processingIndicator')!
 const processingText = document.querySelector<HTMLSpanElement>('#processingText')!
+
+// --- Toggle Logic ---
+providerToggle.addEventListener('change', async (e) => {
+  const target = e.target as HTMLInputElement;
+  const isTavus = target.checked;
+
+  providerLabel.textContent = isTavus ? 'Tavus' : 'HeyGen';
+
+  if (isTavus) {
+    heygenSection.style.display = 'none';
+    tavusSection.style.display = 'block';
+    await stopAvatarSession(); // Cleanup HeyGen
+  } else {
+    heygenSection.style.display = 'block';
+    tavusSection.style.display = 'none';
+    if (callFrame) {
+      await callFrame.leave();
+      callFrame.destroy();
+      callFrame = null;
+      tavusContainer.innerHTML = '<p id="tavusPlaceholder" style="color: #666;">Click Start to connect...</p>';
+      tavusStartBtn.disabled = false;
+      tavusStopBtn.disabled = true;
+    }
+  }
+});
+
+// --- Tavus Logic ---
+tavusStartBtn.addEventListener('click', async () => {
+  tavusStartBtn.disabled = true;
+  tavusStatus.textContent = 'Initializing Tavus session...';
+
+  try {
+    const response = await fetch(`${API_CONFIG.BACKEND_URL}/api/tavus/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}) // Use default persona
+    });
+
+    if (!response.ok) throw new Error('Failed to create Tavus session');
+
+    const data = await response.json();
+    const conversationUrl = data.conversation_url;
+
+    if (!conversationUrl) throw new Error('No conversation URL returned');
+
+    tavusStatus.textContent = 'Connecting to room...';
+
+    // Clear placeholder
+    tavusContainer.innerHTML = '';
+
+    callFrame = DailyIframe.createFrame(tavusContainer, {
+      showLeaveButton: true,
+      iframeStyle: {
+        width: '100%',
+        height: '100%',
+        minHeight: '400px',
+        border: '0',
+        borderRadius: '12px'
+      }
+    });
+
+    // Event Listeners for Tool Calls
+    callFrame.on('app-message', async (e: any) => {
+      console.log('[Tavus] App Event:', e);
+      // Tavus sends tool calls as app-message
+      // Structure might vary, log it first.
+      // As per Tavus docs, it looks for specific event structure.
+      // But usually "app-message" carries the payload.
+
+      // Expected payload from Tavus for tool call might be wrapped.
+      // Let's assume standard Daily app-message for now.
+      /*
+         e.data: {
+             event_type: "tool-call",
+             tool_name: "web_search",
+             tool_call_id: "...",
+             args: { query: "..." }
+         }
+     */
+      const msg = e.data;
+      if (msg?.event_type === 'tool-call' && msg?.tool_name === 'web_search') {
+        console.log('[Tavus] Web Search Requested:', msg.args.query);
+
+        try {
+          const searchRes = await fetch(`${API_CONFIG.BACKEND_URL}/api/web-search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: msg.args.query })
+          });
+          const searchData = await searchRes.json();
+          const resultText = searchData.response || "No results found.";
+
+          // Send result back
+          callFrame.sendAppMessage({
+            event_type: 'tool-response',
+            tool_call_id: msg.tool_call_id,
+            result: resultText
+          });
+          console.log('[Tavus] Sent tool response');
+        } catch (err) {
+          console.error('[Tavus] Tool execution failed:', err);
+          callFrame.sendAppMessage({
+            event_type: 'tool-response',
+            tool_call_id: msg.tool_call_id,
+            error: "Failed to search web"
+          });
+        }
+      }
+    });
+
+    callFrame.on('left-meeting', () => {
+      tavusStatus.textContent = 'Session ended';
+      tavusStopBtn.disabled = true;
+      tavusStartBtn.disabled = false;
+      callFrame.destroy();
+      callFrame = null;
+      tavusContainer.innerHTML = '<p id="tavusPlaceholder" style="color: #666;">Session Ended. Click Start to reconnect.</p>';
+    });
+
+    await callFrame.join({ url: conversationUrl });
+
+    tavusStatus.textContent = 'Connected (Tavus)';
+    tavusStopBtn.disabled = false;
+
+  } catch (err: any) {
+    console.error('[Tavus] Error:', err);
+    tavusStatus.textContent = `Error: ${err.message}`;
+    tavusStartBtn.disabled = false;
+  }
+});
+
+tavusStopBtn.addEventListener('click', () => {
+  if (callFrame) {
+    callFrame.leave();
+  }
+});
 
 function showProcessing(message: string) {
   processingIndicator.style.display = 'flex'

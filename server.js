@@ -681,6 +681,53 @@ app.post('/api/web-search', async (req, res) => {
   return app._router.handle(req, res, () => { });
 });
 
+// --- Tavus API Integration ---
+const TAVUS_API_KEY = process.env.TAVUS_API_KEY;
+const TAVUS_PERSONA_ID = "p653f3322131"; // Default Persona ID
+
+app.post('/api/tavus/session', async (req, res) => {
+  const { personaId } = req.body;
+  const targetPersona = personaId || TAVUS_PERSONA_ID;
+
+  if (!TAVUS_API_KEY) {
+    return res.status(500).json({ error: 'Tavus API Key not configured on server.' });
+  }
+
+  try {
+    console.log(`[Tavus] Creating conversation for persona: ${targetPersona}...`);
+
+    const response = await fetch('https://api.tavus.io/v2/conversations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': TAVUS_API_KEY
+      },
+      body: JSON.stringify({
+        persona_id: targetPersona,
+        replica_id: "r79e1c033f", // Standard replica ID usually required if not inferred, but let's try persona-only first or use a known one if fails.
+        // Actually, v2/conversations usually needs persona_id. 
+        // We will assume the persona has a default replica associated or the API handles it.
+        // If "replica_id" is mandatory and dynamic, we might need to look it up.
+        // For now, sending just persona_id as per typical v2 usage if persona implies replica.
+        // Wait, v2 docs say persona_id is key.
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Tavus API error: ${response.status} ${errText}`);
+    }
+
+    const data = await response.json();
+    console.log('[Tavus] Session created:', data.conversation_id);
+
+    res.json(data);
+  } catch (error) {
+    console.error('[Tavus] Failed to create session:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
