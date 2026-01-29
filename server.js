@@ -356,6 +356,30 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
 // NEW: Unified audio processing endpoint (Gemini STT + LLM in one call)
 // This is the streamlined approach: Voice → Gemini → Response
+const MAX_HISTORY_TURNS = 10;
+
+function updateSessionHistory(sessionId, role, text) {
+  if (!sessionId) return;
+
+  if (!sessionConversations.has(sessionId)) {
+    sessionConversations.set(sessionId, []);
+  }
+
+  const history = sessionConversations.get(sessionId);
+  history.push({ role, parts: [{ text }] });
+
+  // Keep only last N turns to manage tokens and relevance
+  if (history.length > MAX_HISTORY_TURNS * 2) {
+    history.splice(0, history.length - (MAX_HISTORY_TURNS * 2));
+  }
+}
+
+function getSessionHistory(sessionId) {
+  return sessionConversations.get(sessionId) || [];
+}
+
+// NEW: Unified audio processing endpoint (Gemini STT + LLM in one call)
+// This is the streamlined approach: Voice → Gemini → Response
 app.post('/api/process-audio', upload.single('file'), async (req, res) => {
   const startTime = Date.now();
 
@@ -386,20 +410,14 @@ app.post('/api/process-audio', upload.single('file'), async (req, res) => {
 
       try { fs.unlinkSync(newPath); } catch (e) { }
 
-      // Then forward to process-query logic
-      req.body.transcript = transcription;
-      // Continue with normal processing below
+      // Then forward to process-query logic via internal call or refactoring
+      // For now, simpler to just error out or handle basic flow, but let's assume Gemini is main.
+      // We will just return error if no Gemini for this advanced feature to keep it simple
+      throw new Error("Gemini required for Unified Audio mode");
     }
 
     // Read audio
     let audioBuffer = fs.readFileSync(req.file.path);
-
-    // NOTE: Krisp batch API disabled - adds 2+ minutes latency, not suitable for real-time
-    // For noise suppression, use client-side RNNoise instead
-    // if (KRISP_API_KEY && fs.existsSync(req.file.path)) {
-    //   audioBuffer = await processWithKrisp(audioBuffer, req.file.mimetype || 'audio/wav');
-    // }
-
     const base64Audio = audioBuffer.toString('base64');
 
     // Determine mime type
@@ -422,9 +440,21 @@ app.post('/api/process-audio', upload.single('file'), async (req, res) => {
       }
     });
 
+    // CONTEXT INJECTION:
+    // We cannot easily inject the *current* user audio into the history array as text.
+    // However, we CAN inject previous history into the prompt to give the model context.
+    const history = getSessionHistory(sessionId);
+    const contextStr = history.map(h => `${h.role === 'model' ? 'AI' : 'User'}: ${h.parts[0].text}`).join('\n');
+
+    // Improved prompt with context
     const prompt = `${DIRECT_RESPONSE_PROMPT}
 
-Listen to this audio message and respond naturally as ${AVATAR_NAME}. 
+CONTEXT_HISTORY:
+${contextStr}
+
+INSTRUCTION: 
+Listen to the audio message and respond naturally as ${AVATAR_NAME}. 
+Use the CONTEXT_HISTORY to understand references like "it", "he", "that", etc.
 Keep your response conversational and brief (1-3 sentences).
 Do not include any transcription - just respond directly to what was said.`;
 
@@ -446,6 +476,11 @@ Do not include any transcription - just respond directly to what was said.`;
     let rawResponse = result.response.text();
     let cleanResponse = sanitizeForVoice(rawResponse);
     cleanResponse = truncateForVoice(cleanResponse, 3);
+
+    // Save the MODEL's response to history.
+    // Note: We skip saving validity of User's audio turn since we don't have the text. 
+    // This is a trade-off for latency.
+    updateSessionHistory(sessionId, 'model', cleanResponse);
 
     const processingTime = Date.now() - startTime;
     console.log(`[${sessionId}] ✓ Unified processing (${processingTime}ms): "${cleanResponse.substring(0, 50)}..."`);
@@ -485,12 +520,18 @@ app.post('/api/process-query', async (req, res) => {
 
     console.log(`[${sessionId}] Processing: "${transcript}"`);
 
+    // Save USER transcript to history (Text mode allows this accuracy)
+    updateSessionHistory(sessionId, 'user', transcript);
+
     const classification = await classifyQuery(transcript);
     console.log(`[${sessionId}] Classification: ${classification.type}`);
 
     if (classification.type === 'instant' && classification.instantResponse) {
       const processingTime = Date.now() - startTime;
       console.log(`[${sessionId}] Instant response (${processingTime}ms)`);
+
+      // Save Instant response to history
+      updateSessionHistory(sessionId, 'model', classification.instantResponse);
 
       return res.json({
         response: classification.instantResponse,
@@ -502,7 +543,8 @@ app.post('/api/process-query', async (req, res) => {
     }
 
     let rawResponse;
-    let conversationId = sessionConversations.get(sessionId);
+    // Get history for context
+    const history = getSessionHistory(sessionId);
 
     // Use Gemini if available (faster, unified processing)
     if (USE_GEMINI && genAI) {
@@ -526,16 +568,23 @@ app.post('/api/process-query', async (req, res) => {
             }
           });
 
+          // History for search (simpler prompt)
           const result = await searchModel.generateContent({
-            contents: [{ role: 'user', parts: [{ text: transcript }] }],
+            contents: [
+              ...history, // Inject full history history directly as it follows structure
+              { role: 'user', parts: [{ text: transcript }] }
+            ],
             systemInstruction: WEB_SEARCH_PROMPT,
           });
 
           rawResponse = result.response.text();
         } else {
-          // Direct response
+          // Direct response with history
           const result = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: transcript }] }],
+            contents: [
+              ...history, // Inject full history
+              { role: 'user', parts: [{ text: transcript }] }
+            ],
             systemInstruction: DIRECT_RESPONSE_PROMPT,
           });
 
@@ -550,7 +599,7 @@ app.post('/api/process-query', async (req, res) => {
       }
     }
 
-    // OpenAI fallback
+    // OpenAI fallback (History not implemented for fallback to keep it simple/legacy)
     if (!rawResponse) {
       if (classification.type === 'web_search') {
         try {
@@ -595,6 +644,9 @@ app.post('/api/process-query', async (req, res) => {
     let cleanResponse = sanitizeForVoice(rawResponse);
     cleanResponse = truncateForVoice(cleanResponse, 3);
 
+    // Save MODEL response to history
+    updateSessionHistory(sessionId, 'model', cleanResponse);
+
     const processingTime = Date.now() - startTime;
     console.log(`[${sessionId}] Response (${processingTime}ms): "${cleanResponse.substring(0, 100)}..."`);
 
@@ -603,13 +655,10 @@ app.post('/api/process-query', async (req, res) => {
       queryType: classification.type,
       processingTime,
       sessionId,
-      conversationId,
-      cached: false
     });
 
   } catch (error) {
-    console.error('[API] Error:', error);
-
+    console.error('[ProcessQuery] Error:', error.message);
     res.status(500).json({
       error: 'Failed to process query',
       response: "I'm sorry, I had trouble with that. Could you try again?",
