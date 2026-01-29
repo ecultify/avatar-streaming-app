@@ -706,7 +706,7 @@ app.post('/api/tavus/session', async (req, res) => {
   try {
     console.log(`[Tavus] Creating conversation for persona: ${targetPersona}...`);
 
-    const response = await fetch('https://api.tavus.io/v2/conversations', {
+    const response = await fetch('https://tavusapi.com/v2/conversations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
