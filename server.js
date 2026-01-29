@@ -394,12 +394,11 @@ app.post('/api/process-audio', upload.single('file'), async (req, res) => {
     // Read audio
     let audioBuffer = fs.readFileSync(req.file.path);
 
-    // Process with Krisp if available (and file exists)
-    if (KRISP_API_KEY && fs.existsSync(req.file.path)) {
-      const mimeType = req.file.mimetype || 'audio/wav';
-      // Pass buffer to Krisp
-      audioBuffer = await processWithKrisp(audioBuffer, mimeType);
-    }
+    // NOTE: Krisp batch API disabled - adds 2+ minutes latency, not suitable for real-time
+    // For noise suppression, use client-side RNNoise instead
+    // if (KRISP_API_KEY && fs.existsSync(req.file.path)) {
+    //   audioBuffer = await processWithKrisp(audioBuffer, req.file.mimetype || 'audio/wav');
+    // }
 
     const base64Audio = audioBuffer.toString('base64');
 
