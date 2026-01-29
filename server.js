@@ -704,18 +704,14 @@ app.post('/api/tavus/session', async (req, res) => {
       },
       body: JSON.stringify({
         persona_id: targetPersona,
-        replica_id: "r79e1c033f", // Standard replica ID usually required if not inferred, but let's try persona-only first or use a known one if fails.
-        // Actually, v2/conversations usually needs persona_id. 
-        // We will assume the persona has a default replica associated or the API handles it.
-        // If "replica_id" is mandatory and dynamic, we might need to look it up.
-        // For now, sending just persona_id as per typical v2 usage if persona implies replica.
-        // Wait, v2 docs say persona_id is key.
+        replica_id: "r4317e64d25a",
       })
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Tavus API error: ${response.status} ${errText}`);
+      console.error(`[Tavus] Upstream Error: ${response.status} ${errText}`);
+      return res.status(response.status).json({ error: `Tavus API error: ${errText}` });
     }
 
     const data = await response.json();
