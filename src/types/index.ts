@@ -27,6 +27,8 @@ export interface AvatarState {
   vadActive: boolean;
 }
 
+
+
 export interface SessionData {
   sessionId: string;
   conversationId?: string;

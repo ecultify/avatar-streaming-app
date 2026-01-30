@@ -18,6 +18,7 @@ a {
   color: #646cff;
   text-decoration: inherit;
 }
+
 a:hover {
   color: #535bf2;
 }
@@ -56,9 +57,11 @@ h2 {
   will-change: filter;
   transition: filter 300ms;
 }
+
 .logo:hover {
   filter: drop-shadow(0 0 2em #646cffaa);
 }
+
 .logo.vanilla:hover {
   filter: drop-shadow(0 0 2em #3178c6aa);
 }
@@ -82,13 +85,16 @@ button {
   cursor: pointer;
   transition: border-color 0.25s;
 }
+
 button:hover {
   border-color: #646cff;
 }
+
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
+
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -247,10 +253,13 @@ button:disabled {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.5;
     transform: scale(1.2);
@@ -345,7 +354,7 @@ button:disabled {
   .avatar-container.side-by-side {
     flex-direction: column;
   }
-  
+
   .avatar-container.side-by-side .avatar-section {
     max-width: 800px;
   }
@@ -355,15 +364,15 @@ button:disabled {
   .video-container {
     aspect-ratio: 4 / 3;
   }
-  
+
   h1 {
     font-size: 1.4em;
   }
-  
+
   .platform-selector {
     max-width: 100%;
   }
-  
+
   .tab-btn {
     font-size: 0.85em;
     padding: 0.4rem 0.8rem;
@@ -376,9 +385,11 @@ button:disabled {
     color: #213547;
     background-color: #ffffff;
   }
+
   a:hover {
     color: #747bff;
   }
+
   button {
     background-color: #f9f9f9;
   }
@@ -386,11 +397,11 @@ button:disabled {
 
 /* Toggle Switch */
 .provider-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
 .switch {
@@ -400,7 +411,7 @@ button:disabled {
   height: 34px;
 }
 
-.switch input { 
+.switch input {
   opacity: 0;
   width: 0;
   height: 0;
@@ -430,15 +441,15 @@ button:disabled {
   transition: .4s;
 }
 
-input:checked + .slider {
+input:checked+.slider {
   background-color: #2196F3;
 }
 
-input:focus + .slider {
+input:focus+.slider {
   box-shadow: 0 0 1px #2196F3;
 }
 
-input:checked + .slider:before {
+input:checked+.slider:before {
   -webkit-transform: translateX(26px);
   -ms-transform: translateX(26px);
   transform: translateX(26px);
@@ -451,4 +462,48 @@ input:checked + .slider:before {
 
 .slider.round:before {
   border-radius: 50%;
+}
+
+/* Push-to-Talk Button */
+.ptt-button {
+  margin-top: 1rem;
+  padding: 1rem 2rem;
+  font-size: 1.1em;
+  background: linear-gradient(135deg, #646cff 0%, #535bf2 100%);
+  border: 2px solid transparent;
+  border-radius: 50px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.ptt-button:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 20px rgba(100, 108, 255, 0.4);
+}
+
+.ptt-button:active,
+.ptt-button.recording {
+  background: linear-gradient(135deg, #ff4444 0%, #cc3333 100%);
+  transform: scale(0.98);
+  box-shadow: 0 2px 10px rgba(255, 68, 68, 0.5);
+}
+
+.ptt-button.recording {
+  animation: pulse-recording 1s ease-in-out infinite;
+}
+
+@keyframes pulse-recording {
+
+  0%,
+  100% {
+    box-shadow: 0 2px 10px rgba(255, 68, 68, 0.5);
+  }
+
+  50% {
+    box-shadow: 0 4px 25px rgba(255, 68, 68, 0.8);
+  }
 }

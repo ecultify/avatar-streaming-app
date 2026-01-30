@@ -73,6 +73,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <div class="pulse-indicator"></div>
             <span id="voiceStatus">Voice mode inactive</span>
           </div>
+          <button id="pttBtn" type="button" class="ptt-button">🎤 Hold to Talk</button>
           <button id="stopSpeakingBtn" type="button" style="display: none;">Done Speaking</button>
         </div>
         
@@ -96,6 +97,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
         <div class="info">
             <p id="tavusStatus">Ready to connect</p>
+            <button id="tavusPttBtn" type="button" class="ptt-button" style="display: none;">🎤 Hold to Talk</button>
         </div>
       </div>
 
@@ -138,6 +140,12 @@ const sendBtn = document.querySelector<HTMLButtonElement>('#sendBtn')!
 
 const processingIndicator = document.querySelector<HTMLDivElement>('#processingIndicator')!
 const processingText = document.querySelector<HTMLSpanElement>('#processingText')!
+const pttBtn = document.querySelector<HTMLButtonElement>('#pttBtn')!
+const tavusPttBtn = document.getElementById('tavusPttBtn') as HTMLButtonElement;
+
+// Interrupt keywords for HeyGen TTS
+const INTERRUPT_KEYWORDS = ['hello', 'hi', 'hey', 'stop', 'wait', 'excuse me', 'hold on', 'one moment'];
+let isPttActive = false;
 
 // --- Toggle Logic ---
 providerToggle.addEventListener('change', async (e) => {
@@ -381,8 +389,12 @@ tavusStartBtn.addEventListener('click', async () => {
       startVideoOff: true
     });
 
-    tavusStatus.textContent = 'Connected (Minimal UI)';
+    tavusStatus.textContent = 'Connected - Hold button to speak';
     tavusStopBtn.disabled = false;
+
+    // Show PTT button and mute mic by default (PTT mode)
+    // tavusPttBtn.style.display = 'block';
+    // callFrame.setLocalAudio(false);
 
   } catch (err: any) {
     console.error('[Tavus] Error:', err);
@@ -668,6 +680,31 @@ async function processAudioUnified(audioBlob: Blob, sessionId: string): Promise<
 // Flag to use unified processing (Gemini) vs separate transcription + query
 const USE_UNIFIED_PROCESSING = true;
 
+// Quick transcription for keyword interrupt detection (shorter timeout)
+async function quickTranscribeForKeywords(audioBlob: Blob): Promise<string | null> {
+  try {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'interrupt.webm');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s max
+
+    const response = await fetch(`${API_CONFIG.BACKEND_URL}/api/transcribe`, {
+      method: 'POST',
+      body: formData,
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.text || null;
+  } catch {
+    return null; // Silent fail - just skip keyword check
+  }
+}
+
 
 async function processUserSpeech(audioBlob: Blob): Promise<void> {
   if (isProcessingAudio) { // Removed isAvatarSpeaking check to allow full duplex interruption
@@ -815,18 +852,30 @@ async function startVoiceChatWithVAD() {
 
         // If avatar was speaking, check if this is a real interruption
         if (wasAvatarSpeaking) {
-          // Require minimum audio size to count as real interruption
-          // This filters out background noise, self-echo, and short sounds
+          // For short audio during TTS, do quick keyword check
           if (audioBlob.size < MIN_INTERRUPT_AUDIO_SIZE) {
-            console.log(`[VAD] Ignoring short sound during TTS (${audioBlob.size} bytes, ${speechDuration}ms)`);
-            voiceStatus.textContent = 'Avatar speaking...';
-            return;
+            // Try quick transcription to check for interrupt keywords
+            try {
+              const quickTranscript = await quickTranscribeForKeywords(audioBlob);
+              if (quickTranscript && checkForInterruptKeyword(quickTranscript)) {
+                console.log(`[VAD] Keyword interrupt detected: "${quickTranscript}"`);
+                isAvatarSpeaking = false;
+                // Continue to process the speech
+              } else {
+                console.log(`[VAD] Ignoring short sound during TTS (${audioBlob.size} bytes, ${speechDuration}ms)`);
+                voiceStatus.textContent = 'Avatar speaking...';
+                return;
+              }
+            } catch {
+              console.log(`[VAD] Ignoring short sound during TTS (${audioBlob.size} bytes, ${speechDuration}ms)`);
+              voiceStatus.textContent = 'Avatar speaking...';
+              return;
+            }
+          } else {
+            // Real interruption detected (substantial speech)
+            console.log(`[VAD] Interrupting avatar! (${audioBlob.size} bytes, ${speechDuration}ms)`);
+            isAvatarSpeaking = false;
           }
-
-          // Real interruption detected!
-          console.log(`[VAD] Interrupting avatar! (${audioBlob.size} bytes, ${speechDuration}ms)`);
-          isAvatarSpeaking = false;
-          // Note: HeyGen avatar.interrupt() can be called here if available
         }
 
         // If busy processing another request, ignore
@@ -1128,3 +1177,103 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
+// --- HeyGen Push-to-Talk Implementation ---
+let pttMediaRecorder: MediaRecorder | null = null;
+let pttAudioChunks: Blob[] = [];
+let pttStream: MediaStream | null = null;
+
+async function startPttRecording() {
+  if (!avatar || !isVoiceModeActive) return;
+
+  try {
+    if (!pttStream) {
+      pttStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+    }
+
+    pttAudioChunks = [];
+    pttMediaRecorder = new MediaRecorder(pttStream, { mimeType: 'audio/webm' });
+
+    pttMediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) pttAudioChunks.push(e.data);
+    };
+
+    pttMediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(pttAudioChunks, { type: 'audio/webm' });
+      if (audioBlob.size > 5000) {
+        await processUserSpeech(audioBlob);
+      }
+    };
+
+    pttMediaRecorder.start();
+    isPttActive = true;
+    pttBtn.textContent = '🔴 Recording...';
+    pttBtn.classList.add('recording');
+    voiceStatus.textContent = 'Recording... (release to send)';
+
+    // If avatar is speaking, pause VAD to avoid echo
+    if (isAvatarSpeaking) {
+      pauseVAD();
+    }
+  } catch (err) {
+    console.error('[PTT] Failed to start:', err);
+  }
+}
+
+function stopPttRecording() {
+  if (pttMediaRecorder && pttMediaRecorder.state === 'recording') {
+    pttMediaRecorder.stop();
+  }
+  isPttActive = false;
+  pttBtn.textContent = '🎤 Hold to Talk';
+  pttBtn.classList.remove('recording');
+  voiceStatus.textContent = 'Listening... (speak anytime)';
+
+  // Resume VAD if it was paused
+  if (vadInitialized && isVoiceModeActive) {
+    startVAD();
+  }
+}
+
+// HeyGen PTT button events (mouse + touch)
+// HeyGen PTT button events (mouse + touch)
+pttBtn.addEventListener('mousedown', startPttRecording);
+pttBtn.addEventListener('mouseup', stopPttRecording);
+pttBtn.addEventListener('mouseleave', () => { if (isPttActive) stopPttRecording(); });
+pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPttRecording(); });
+pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopPttRecording(); });
+
+// --- Tavus Push-to-Talk Implementation ---
+let tavusPttActive = false;
+
+function startTavusPtt() {
+  if (!callFrame) return;
+  tavusPttActive = true;
+  callFrame.setLocalAudio(true);
+  tavusPttBtn.textContent = '🔴 Recording...';
+  tavusPttBtn.classList.add('recording');
+  tavusStatus.textContent = 'Recording... (release to send)';
+}
+
+function stopTavusPtt() {
+  if (!callFrame) return;
+  tavusPttActive = false;
+  callFrame.setLocalAudio(false);
+  tavusPttBtn.textContent = '🎤 Hold to Talk';
+  tavusPttBtn.classList.remove('recording');
+  tavusStatus.textContent = 'Connected - Hold button to speak';
+}
+
+// Tavus PTT button events
+tavusPttBtn.addEventListener('mousedown', startTavusPtt);
+tavusPttBtn.addEventListener('mouseup', stopTavusPtt);
+tavusPttBtn.addEventListener('mouseleave', () => { if (tavusPttActive) stopTavusPtt(); });
+tavusPttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTavusPtt(); });
+tavusPttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTavusPtt(); });
+
+// --- Keyword Interruption Check for HeyGen ---
+function checkForInterruptKeyword(transcript: string): boolean {
+  const lower = transcript.toLowerCase().trim();
+  return INTERRUPT_KEYWORDS.some(kw => lower.includes(kw));
+}
