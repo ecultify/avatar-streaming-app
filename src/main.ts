@@ -783,6 +783,13 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
     console.log(`${ts()} [Voice] 🗣️ Avatar starting to speak...`);
     voiceStatus.textContent = 'Avatar speaking...';
     hideProcessing();
+
+    // Unmute now that new stream is ready
+    if (heygenVideo.muted) {
+      heygenVideo.muted = false;
+      console.log('[Voice] Unmuted video for new response');
+    }
+
     isAvatarSpeaking = true;
 
     await avatar.speak({
@@ -811,6 +818,9 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
     if (isVoiceModeActive && vadInitialized) {
       setTimeout(() => resumeVAD(), 1000);
     }
+  } finally {
+    // Ensure we unmute in case of error so we don't get stuck muted
+    if (heygenVideo.muted) heygenVideo.muted = false;
   }
 }
 
@@ -1218,7 +1228,8 @@ async function startPttRecording() {
       // Mute immediately to ensure silence
       heygenVideo.muted = true;
       try {
-        (avatar as any).interrupt();
+        await (avatar as any).interrupt();
+        console.log('[PTT] Interruption sent');
       } catch (e) {
         console.warn('[PTT] Failed to interrupt:', e);
       }
@@ -1240,7 +1251,7 @@ function stopPttRecording() {
   voiceStatus.textContent = 'Listening... (speak anytime)';
 
   // Unmute ensuring we hear the next response
-  heygenVideo.muted = false;
+  // heygenVideo.muted = false; // MOVED: Unmute only when new speech starts to avoid "tail" audio
 
   // Resume VAD if it was paused
   if (vadInitialized && isVoiceModeActive) {
