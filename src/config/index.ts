@@ -5,9 +5,13 @@ export const MODELS = {
 };
 
 export const AVATAR_CONFIG = {
-  NAME: "Marianne",
-  VOICE_ID: "2d5b0e6cf36f460aa7fc47e3eee4ba54",
-  AVATAR_ID: "Marianne_Chair_Sitting_public"
+  AVATAR_ID: '3448df7404a3424d9ca2543956ca010c', // Default HeyGen Avatar
+  VOICE_ID: 'fdf0271569474704812328731b997e06',  // Default HeyGen Voice
+};
+
+export const CONVAI_CONFIG = {
+  API_KEY: import.meta.env.VITE_CONVAI_API_KEY || '',
+  CHARACTER_ID: import.meta.env.VITE_CONVAI_CHARACTER_ID || '',
 };
 
 export const VAD_CONFIG = {

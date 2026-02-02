@@ -6,7 +6,8 @@ import StreamingAvatar, {
 } from '@heygen/streaming-avatar'
 import DailyIframe from '@daily-co/daily-js';
 import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './utils/voiceActivityDetection'
-import { API_CONFIG, AVATAR_CONFIG } from './config'
+import { API_CONFIG, AVATAR_CONFIG, CONVAI_CONFIG } from './config'
+import { ConvaiClient } from 'convai-web-sdk';
 // Voice Agent Configuration
 // (Removed VAPI configuration)
 
@@ -31,12 +32,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div>
     <h1>AI Avatar Assistant</h1>
     
-    <div class="provider-toggle">
-        <label class="switch">
-            <input type="checkbox" id="providerToggle">
-            <span class="slider round"></span>
-        </label>
-        <span id="providerLabel">HeyGen</span>
+    <div class="platform-selector">
+        <button id="tabHeyGen" class="tab-btn active">HeyGen</button>
+        <button id="tabTavus" class="tab-btn">Tavus</button>
+        <button id="tabConvai" class="tab-btn">Convai</button>
     </div>
 
     <div id="avatarContainer" class="avatar-container">
@@ -101,6 +100,24 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
       </div>
 
+      <!-- Convai Section -->
+      <div id="convaiSection" class="avatar-section" style="display: none;">
+        <div class="section-header">
+            <h2>Convai Character</h2>
+            <div class="controls">
+                <button id="convaiStartBtn" type="button">Start Session</button>
+                <button id="convaiStopBtn" type="button" disabled>End Session</button>
+            </div>
+        </div>
+        <div id="convaiContainer" class="video-container" style="background: #000; min-height: 400px; display: flex; align-items: center; justify-content: center;">
+            <p id="convaiPlaceholder" style="color: #666;">Click Start to connect...</p>
+        </div>
+        <div class="info">
+            <p id="convaiStatus">Ready to connect</p>
+            <button id="convaiPttBtn" type="button" class="ptt-button" style="display: none;">Hold to Talk</button>
+        </div>
+      </div>
+
     </div>
   </div>
 `
@@ -119,8 +136,12 @@ const heygenSessionInfo = document.querySelector<HTMLParagraphElement>('#heygenS
 
 const tavusSection = document.getElementById('tavusSection') as HTMLDivElement;
 const heygenSection = document.getElementById('heygenSection') as HTMLDivElement;
-const providerToggle = document.getElementById('providerToggle') as HTMLInputElement;
-const providerLabel = document.getElementById('providerLabel') as HTMLSpanElement;
+const convaiSection = document.getElementById('convaiSection') as HTMLDivElement;
+
+const tabHeyGen = document.getElementById('tabHeyGen') as HTMLButtonElement;
+const tabTavus = document.getElementById('tabTavus') as HTMLButtonElement;
+const tabConvai = document.getElementById('tabConvai') as HTMLButtonElement;
+
 const tavusStartBtn = document.getElementById('tavusStartBtn') as HTMLButtonElement;
 const tavusStopBtn = document.getElementById('tavusStopBtn') as HTMLButtonElement;
 const tavusStatus = document.getElementById('tavusStatus') as HTMLParagraphElement;
@@ -142,35 +163,171 @@ const processingIndicator = document.querySelector<HTMLDivElement>('#processingI
 const processingText = document.querySelector<HTMLSpanElement>('#processingText')!
 const pttBtn = document.querySelector<HTMLButtonElement>('#pttBtn')!
 const tavusPttBtn = document.getElementById('tavusPttBtn') as HTMLButtonElement;
+const convaiPttBtn = document.getElementById('convaiPttBtn') as HTMLButtonElement;
+const convaiStartBtn = document.getElementById('convaiStartBtn') as HTMLButtonElement;
+const convaiStopBtn = document.getElementById('convaiStopBtn') as HTMLButtonElement;
+const convaiStatus = document.getElementById('convaiStatus') as HTMLParagraphElement;
+const convaiContainer = document.getElementById('convaiContainer') as HTMLDivElement;
 
 // Interrupt keywords for HeyGen TTS
 const INTERRUPT_KEYWORDS = ['hello', 'hi', 'hey', 'stop', 'wait', 'excuse me', 'hold on', 'one moment'];
 let isPttActive = false;
 
-// --- Toggle Logic ---
-providerToggle.addEventListener('change', async (e) => {
-  const target = e.target as HTMLInputElement;
-  const isTavus = target.checked;
+// --- Tab Switching Logic ---
+async function switchTab(platform: 'heygen' | 'tavus' | 'convai') {
+  // 1. Update Buttons
+  tabHeyGen.classList.toggle('active', platform === 'heygen');
+  tabTavus.classList.toggle('active', platform === 'tavus');
+  tabConvai.classList.toggle('active', platform === 'convai');
 
-  providerLabel.textContent = isTavus ? 'Tavus' : 'HeyGen';
+  // 2. Hide all sections
+  heygenSection.style.display = 'none';
+  tavusSection.style.display = 'none';
+  convaiSection.style.display = 'none';
 
-  if (isTavus) {
-    heygenSection.style.display = 'none';
-    tavusSection.style.display = 'block';
-    await stopAvatarSession(); // Cleanup HeyGen
-  } else {
+  // 3. Cleanup existing sessions
+  await stopAvatarSession(); // HeyGen
+
+  if (callFrame) { // Tavus
+    await callFrame.leave();
+    callFrame.destroy();
+    callFrame = null;
+    tavusContainer.innerHTML = '<p id="tavusPlaceholder" style="color: #666;">Click Start to connect...</p>';
+    tavusStartBtn.disabled = false;
+    tavusStopBtn.disabled = true;
+  }
+
+  if (convaiClient) { // Convai
+    await endConvaiSession();
+  }
+
+  // 4. Show selected section
+  if (platform === 'heygen') {
     heygenSection.style.display = 'block';
-    tavusSection.style.display = 'none';
-    if (callFrame) {
-      await callFrame.leave();
-      callFrame.destroy();
-      callFrame = null;
-      tavusContainer.innerHTML = '<p id="tavusPlaceholder" style="color: #666;">Click Start to connect...</p>';
-      tavusStartBtn.disabled = false;
-      tavusStopBtn.disabled = true;
-    }
+  } else if (platform === 'tavus') {
+    tavusSection.style.display = 'block';
+  } else if (platform === 'convai') {
+    convaiSection.style.display = 'block';
+  }
+}
+
+tabHeyGen.addEventListener('click', () => switchTab('heygen'));
+tabTavus.addEventListener('click', () => switchTab('tavus'));
+tabConvai.addEventListener('click', () => switchTab('convai'));
+
+// --- Convai Logic ---
+let convaiClient: ConvaiClient | null = null;
+let convaiIsTalking = false;
+
+convaiStartBtn.addEventListener('click', async () => {
+  convaiStartBtn.disabled = true;
+  convaiStatus.textContent = 'Initializing Convai...';
+
+  try {
+    convaiClient = new ConvaiClient({
+      apiKey: CONVAI_CONFIG.API_KEY,
+      characterId: CONVAI_CONFIG.CHARACTER_ID,
+      enableAudio: true,
+    });
+
+    convaiClient.setResponseCallback((response: any) => {
+      if (response.hasUserQuery()) {
+        const transcript = response.getUserQuery().getTextData();
+        if (response.getUserQuery().getIsFinal()) {
+          console.log('[Convai] User:', transcript);
+        }
+      }
+      if (response.hasAudioResponse()) {
+        const audioResponse = response.getAudioResponse();
+        if (audioResponse) {
+          // Audio is handled automatically by the SDK usually, 
+          // but sometimes needs manual play if auto-play blocked
+          // For now, assume SDK handles it.
+        }
+      }
+    });
+
+    // Handle talking state for PTT interruption if needed
+    convaiClient.onAudioPlay(() => {
+      convaiIsTalking = true;
+      convaiStatus.textContent = 'Character speaking...';
+    });
+
+    convaiClient.onAudioStop(() => {
+      convaiIsTalking = false;
+      convaiStatus.textContent = 'Connected - Hold button to speak';
+    });
+
+    await convaiClient.startAudioChunk();
+
+    convaiStatus.textContent = 'Connected - Hold button to speak';
+    convaiStopBtn.disabled = false;
+    convaiPttBtn.style.display = 'block';
+
+    // Setup Placeholder Video (Convai is currently audio-focused in basic SDK, 
+    // unless using Unity/Unreal. For Web SDK text/audio, we might just show a static image or visualization.
+    // If they support a web avatar viewer, we'd embed it here. 
+    // For now, let's just make it clear it's active.)
+    convaiContainer.innerHTML = '<div style="text-align:center; color: white;"><h2>🎙️</h2><p>Convai Session Active</p></div>';
+
+  } catch (err: any) {
+    console.error('[Convai] Error:', err);
+    convaiStatus.textContent = 'Error: ' + err.message;
+    convaiStartBtn.disabled = false;
   }
 });
+
+async function endConvaiSession() {
+  if (convaiClient) {
+    try {
+      convaiClient.endAudioChunk(); // Correct method? check docs usually. 
+      // The SDK might just need setting to null or specific stop.
+      // convai-web-sdk usually has .end() or similar? 
+      // Looking at standard usage: just stop sending audio and maybe reset.
+    } catch (e) {
+      console.warn('[Convai] Error stopping', e);
+    }
+    convaiClient = null;
+  }
+  convaiStatus.textContent = 'Session ended';
+  convaiStopBtn.disabled = true;
+  convaiStartBtn.disabled = false;
+  convaiPttBtn.style.display = 'none';
+  convaiContainer.innerHTML = '<p id="convaiPlaceholder" style="color: #666;">Click Start to connect...</p>';
+}
+
+convaiStopBtn.addEventListener('click', endConvaiSession);
+
+// Convai PTT Logic
+function startConvaiPtt() {
+  if (!convaiClient) return;
+  try {
+    convaiClient.startAudioChunk(); // Signals start of user speech
+    convaiPttBtn.textContent = 'Recording...';
+    convaiPttBtn.classList.add('recording');
+    // Convai usually handles mic input automatically when set up?
+    // Actually, with `enableAudio: true`, it might be always listening or VAD?
+    // If "Hold to Talk", we might need to manually toggle microphone processing.
+    // Ideally, we use `startAudioChunk` (renamed often in newer SDKs to `startRecording` or similar).
+    // Let's assume `toggleAudioVolume` or specific mic controls.
+    // For standard "Chat" PTT, we often just start the mic.
+  } catch (e) { console.error(e) }
+}
+
+function stopConvaiPtt() {
+  if (!convaiClient) return;
+  try {
+    convaiClient.endAudioChunk(); // Signals end of speech / process now
+    convaiPttBtn.textContent = 'Hold to Talk';
+    convaiPttBtn.classList.remove('recording');
+  } catch (e) { console.error(e) }
+}
+
+convaiPttBtn.addEventListener('mousedown', startConvaiPtt);
+convaiPttBtn.addEventListener('mouseup', stopConvaiPtt);
+convaiPttBtn.addEventListener('mouseleave', () => stopConvaiPtt());
+convaiPttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startConvaiPtt(); });
+convaiPttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopConvaiPtt(); });
 
 // --- Tavus Logic ---
 tavusStartBtn.addEventListener('click', async () => {
