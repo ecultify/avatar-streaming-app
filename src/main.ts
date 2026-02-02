@@ -1212,8 +1212,15 @@ async function startPttRecording() {
     pttBtn.classList.add('recording');
     voiceStatus.textContent = 'Recording... (release to send)';
 
-    // If avatar is speaking, pause VAD to avoid echo
+    // If avatar is speaking, interrupt it and pause VAD
     if (isAvatarSpeaking) {
+      console.log('[PTT] Interrupting avatar...');
+      try {
+        (avatar as any).interrupt();
+      } catch (e) {
+        console.warn('[PTT] Failed to interrupt:', e);
+      }
+      isAvatarSpeaking = false;
       pauseVAD();
     }
   } catch (err) {
