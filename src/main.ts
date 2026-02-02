@@ -73,7 +73,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <div class="pulse-indicator"></div>
             <span id="voiceStatus">Voice mode inactive</span>
           </div>
-          <!-- <button id="pttBtn" type="button" class="ptt-button">🎤 Hold to Talk</button> -->
+          <button id="pttBtn" type="button" class="ptt-button">Hold to Talk</button>
           <button id="stopSpeakingBtn" type="button" style="display: none;">Done Speaking</button>
         </div>
         
@@ -140,7 +140,7 @@ const sendBtn = document.querySelector<HTMLButtonElement>('#sendBtn')!
 
 const processingIndicator = document.querySelector<HTMLDivElement>('#processingIndicator')!
 const processingText = document.querySelector<HTMLSpanElement>('#processingText')!
-// const pttBtn = document.querySelector<HTMLButtonElement>('#pttBtn')!
+const pttBtn = document.querySelector<HTMLButtonElement>('#pttBtn')!
 const tavusPttBtn = document.getElementById('tavusPttBtn') as HTMLButtonElement;
 
 // Interrupt keywords for HeyGen TTS
@@ -1177,7 +1177,6 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-/*
 // --- HeyGen Push-to-Talk Implementation ---
 let pttMediaRecorder: MediaRecorder | null = null;
 let pttAudioChunks: Blob[] = [];
@@ -1209,8 +1208,8 @@ async function startPttRecording() {
 
     pttMediaRecorder.start();
     isPttActive = true;
-    // pttBtn.textContent = '🔴 Recording...';
-    // pttBtn.classList.add('recording');
+    pttBtn.textContent = 'Recording...';
+    pttBtn.classList.add('recording');
     voiceStatus.textContent = 'Recording... (release to send)';
 
     // If avatar is speaking, pause VAD to avoid echo
@@ -1227,8 +1226,8 @@ function stopPttRecording() {
     pttMediaRecorder.stop();
   }
   isPttActive = false;
-  // pttBtn.textContent = '🎤 Hold to Talk';
-  // pttBtn.classList.remove('recording');
+  pttBtn.textContent = 'Hold to Talk';
+  pttBtn.classList.remove('recording');
   voiceStatus.textContent = 'Listening... (speak anytime)';
 
   // Resume VAD if it was paused
@@ -1238,13 +1237,11 @@ function stopPttRecording() {
 }
 
 // HeyGen PTT button events (mouse + touch)
-// HeyGen PTT button events (mouse + touch)
-// pttBtn.addEventListener('mousedown', startPttRecording);
-// pttBtn.addEventListener('mouseup', stopPttRecording);
-// pttBtn.addEventListener('mouseleave', () => { if (isPttActive) stopPttRecording(); });
-// pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPttRecording(); });
-// pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopPttRecording(); });
-*/
+pttBtn.addEventListener('mousedown', startPttRecording);
+pttBtn.addEventListener('mouseup', stopPttRecording);
+pttBtn.addEventListener('mouseleave', () => { if (isPttActive) stopPttRecording(); });
+pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startPttRecording(); });
+pttBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopPttRecording(); });
 
 // --- Tavus Push-to-Talk Implementation ---
 let tavusPttActive = false;

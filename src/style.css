@@ -467,12 +467,12 @@ input:checked+.slider:before {
 /* Push-to-Talk Button */
 .ptt-button {
   margin-top: 1rem;
-  padding: 1rem 2rem;
-  font-size: 1.1em;
-  background: linear-gradient(135deg, #646cff 0%, #535bf2 100%);
-  border: 2px solid transparent;
-  border-radius: 50px;
-  color: white;
+  padding: 0.8rem 1.5rem;
+  font-size: 1em;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.87);
   cursor: pointer;
   transition: all 0.2s ease;
   user-select: none;
@@ -481,29 +481,13 @@ input:checked+.slider:before {
 }
 
 .ptt-button:hover {
-  transform: scale(1.02);
-  box-shadow: 0 4px 20px rgba(100, 108, 255, 0.4);
+  border-color: #646cff;
+  background: rgba(100, 108, 255, 0.1);
 }
 
 .ptt-button:active,
 .ptt-button.recording {
-  background: linear-gradient(135deg, #ff4444 0%, #cc3333 100%);
-  transform: scale(0.98);
-  box-shadow: 0 2px 10px rgba(255, 68, 68, 0.5);
-}
-
-.ptt-button.recording {
-  animation: pulse-recording 1s ease-in-out infinite;
-}
-
-@keyframes pulse-recording {
-
-  0%,
-  100% {
-    box-shadow: 0 2px 10px rgba(255, 68, 68, 0.5);
-  }
-
-  50% {
-    box-shadow: 0 4px 25px rgba(255, 68, 68, 0.8);
-  }
+  border-color: #ff4444;
+  color: #ff4444;
+  background: rgba(255, 68, 68, 0.1);
 }
