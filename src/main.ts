@@ -1215,6 +1215,8 @@ async function startPttRecording() {
     // If avatar is speaking, interrupt it and pause VAD
     if (isAvatarSpeaking) {
       console.log('[PTT] Interrupting avatar...');
+      // Mute immediately to ensure silence
+      heygenVideo.muted = true;
       try {
         (avatar as any).interrupt();
       } catch (e) {
@@ -1236,6 +1238,9 @@ function stopPttRecording() {
   pttBtn.textContent = 'Hold to Talk';
   pttBtn.classList.remove('recording');
   voiceStatus.textContent = 'Listening... (speak anytime)';
+
+  // Unmute ensuring we hear the next response
+  heygenVideo.muted = false;
 
   // Resume VAD if it was paused
   if (vadInitialized && isVoiceModeActive) {
