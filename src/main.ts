@@ -220,17 +220,30 @@ let convaiClient: ConvaiClient | null = null;
 let convaiIsTalking = false;
 
 convaiStartBtn.addEventListener('click', async () => {
+  console.log('[Convai] Start button clicked');
   convaiStartBtn.disabled = true;
   convaiStatus.textContent = 'Initializing Convai...';
 
+  // Check Config
+  console.log('[Convai] Config:', CONVAI_CONFIG);
+  if (!CONVAI_CONFIG.API_KEY || !CONVAI_CONFIG.CHARACTER_ID) {
+    alert('Missing Convai API Key or Character ID in .env');
+    convaiStatus.textContent = 'Error: Missing Credentials';
+    convaiStartBtn.disabled = false;
+    return;
+  }
+
   try {
+    console.log('[Convai] Creating client...');
     convaiClient = new ConvaiClient({
       apiKey: CONVAI_CONFIG.API_KEY,
       characterId: CONVAI_CONFIG.CHARACTER_ID,
       enableAudio: true,
     });
+    console.log('[Convai] Client created');
 
     convaiClient.setResponseCallback((response: any) => {
+      // console.log('[Convai] Response:', response);
       if (response.hasUserQuery()) {
         const transcript = response.getUserQuery().getTextData();
         if (response.getUserQuery().getIsFinal()) {
@@ -239,26 +252,30 @@ convaiStartBtn.addEventListener('click', async () => {
       }
       if (response.hasAudioResponse()) {
         const audioResponse = response.getAudioResponse();
+        /*
         if (audioResponse) {
-          // Audio is handled automatically by the SDK usually, 
-          // but sometimes needs manual play if auto-play blocked
-          // For now, assume SDK handles it.
+           console.log('[Convai] Audio response received');
         }
+        */
       }
     });
 
     // Handle talking state for PTT interruption if needed
     convaiClient.onAudioPlay(() => {
+      console.log('[Convai] Audio Play');
       convaiIsTalking = true;
       convaiStatus.textContent = 'Character speaking...';
     });
 
     convaiClient.onAudioStop(() => {
+      console.log('[Convai] Audio Stop');
       convaiIsTalking = false;
       convaiStatus.textContent = 'Connected - Hold button to speak';
     });
 
+    console.log('[Convai] Starting audio chunk...');
     await convaiClient.startAudioChunk();
+    console.log('[Convai] Audio chunk started');
 
     convaiStatus.textContent = 'Connected - Hold button to speak';
     convaiStopBtn.disabled = false;
@@ -274,6 +291,7 @@ convaiStartBtn.addEventListener('click', async () => {
     console.error('[Convai] Error:', err);
     convaiStatus.textContent = 'Error: ' + err.message;
     convaiStartBtn.disabled = false;
+    alert('Convai Error: ' + err.message);
   }
 });
 
