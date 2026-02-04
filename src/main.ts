@@ -617,7 +617,7 @@ function updateHeyGenStatus(message: string) {
 
 async function fetchAccessToken(): Promise<string> {
   try {
-    const response = await fetch(`${AVATAR_CONFIG.BASE_PATH}/sessions/token`, {
+    const response = await fetch(`${AVATAR_CONFIG.BASE_PATH}/v1/sessions/token`, {
       method: 'POST',
       headers: {
         'x-api-key': AVATAR_CONFIG.API_KEY,

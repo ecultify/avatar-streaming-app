@@ -8,7 +8,7 @@ export const AVATAR_CONFIG = {
   AVATAR_ID: import.meta.env.VITE_LIVEAVATAR_CHARACTER_ID || 'bf00036b-558a-44b5-b2ff-1e3cec0f4ceb',
   VOICE_ID: 'en-US-Neural2-A', // Default voice for LiveAvatar/Custom mode
   API_KEY: import.meta.env.VITE_LIVEAVATAR_API_KEY || '',
-  BASE_PATH: 'https://api.liveavatar.com/v1',
+  BASE_PATH: 'https://api.liveavatar.com',
 };
 
 export const CONVAI_CONFIG = {
