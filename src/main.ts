@@ -265,12 +265,24 @@ convaiStartBtn.addEventListener('click', async () => {
       console.log('[Convai] Audio Play');
       convaiIsTalking = true;
       convaiStatus.textContent = 'Character speaking...';
+
+      // Visual Updates
+      const indicator = document.getElementById('convaiTalkingIndicator');
+      const img = document.getElementById('convaiAvatarImg');
+      if (indicator) indicator.style.opacity = '1';
+      if (img) img.style.transform = 'scale(1.05)';
     });
 
     convaiClient.onAudioStop(() => {
       console.log('[Convai] Audio Stop');
       convaiIsTalking = false;
       convaiStatus.textContent = 'Connected - Hold button to speak';
+
+      // Visual Updates
+      const indicator = document.getElementById('convaiTalkingIndicator');
+      const img = document.getElementById('convaiAvatarImg');
+      if (indicator) indicator.style.opacity = '0';
+      if (img) img.style.transform = 'scale(1)';
     });
 
     console.log('[Convai] Starting audio chunk...');
@@ -281,11 +293,16 @@ convaiStartBtn.addEventListener('click', async () => {
     convaiStopBtn.disabled = false;
     convaiPttBtn.style.display = 'block';
 
-    // Setup Placeholder Video (Convai is currently audio-focused in basic SDK, 
-    // unless using Unity/Unreal. For Web SDK text/audio, we might just show a static image or visualization.
-    // If they support a web avatar viewer, we'd embed it here. 
-    // For now, let's just make it clear it's active.)
-    convaiContainer.innerHTML = '<div style="text-align:center; color: white;"><h2>🎙️</h2><p>Convai Session Active</p></div>';
+    // Show Avatar Image
+    const avatarImage = "https://models.readyplayer.me/63f899cd9dc8b8dcb3aff2b4.png?pose=relaxed&background=0,0,60";
+    convaiContainer.innerHTML = `
+            <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                <img id="convaiAvatarImg" src="${avatarImage}" alt="Convai Avatar" style="max-height: 80%; border-radius: 12px; transition: transform 0.2s; box-shadow: 0 0 20px rgba(0,0,0,0.5);">
+                <div id="convaiTalkingIndicator" style="margin-top: 15px; color: #4ade80; opacity: 0; transition: opacity 0.2s;">
+                    Speaking... 🔊
+                </div>
+            </div>
+        `;
 
   } catch (err: any) {
     console.error('[Convai] Error:', err);
@@ -671,15 +688,34 @@ async function initializeAvatarSession() {
     })
 
     updateHeyGenStatus('Starting avatar...')
-    sessionData = await avatar.createStartAvatar({
+
+    // Prepare Request Data
+    // Gemini Integration Mode: Standard Avatar with Voice ID
+    const requestData: any = {
       quality: AvatarQuality.High,
       avatarName: AVATAR_CONFIG.AVATAR_ID,
       voice: {
-        voiceId: AVATAR_CONFIG.VOICE_ID
+        voiceId: AVATAR_CONFIG.VOICE_ID,
+        // rate: 1.0, // Optional: Adjust speed
+        // emotion: VoiceEmotion.EXCITED // Optional
       },
       language: 'en',
-      disableIdleTimeout: false
-    })
+      // disableIdleTimeout: false // DEPRECATED: Causing 400 errors in some cases. Use keepAlive() if needed.
+    };
+
+    console.log('[HeyGen] Starting with payload:', JSON.stringify(requestData, null, 2));
+
+    try {
+      sessionData = await avatar.createStartAvatar(requestData);
+    } catch (e: any) {
+      // Fallback: Try without specific voice if it fails (sometimes voice/avatar mismatch)
+      console.warn('[HeyGen] Start failed, retrying minimal payload...', e);
+      const minimalData = {
+        quality: AvatarQuality.Medium,
+        avatarName: AVATAR_CONFIG.AVATAR_ID,
+      };
+      sessionData = await avatar.createStartAvatar(minimalData);
+    }
 
     console.log('[HeyGen] Session data:', sessionData)
     heygenSessionInfo.textContent = `Session ID: ${sessionData.session_id}`

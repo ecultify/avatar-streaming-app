@@ -5,8 +5,9 @@ export const MODELS = {
 };
 
 export const AVATAR_CONFIG = {
-  AVATAR_ID: '3448df7404a3424d9ca2543956ca010c', // Default HeyGen Avatar
-  VOICE_ID: 'fdf0271569474704812328731b997e06',  // Default HeyGen Voice
+  AVATAR_ID: import.meta.env.VITE_AVATAR_ID || '3448df7404a3424d9ca2543956ca010c', // Default HeyGen Avatar
+  VOICE_ID: import.meta.env.VITE_VOICE_ID || 'fdf0271569474704812328731b997e06',  // Default HeyGen Voice
+  KNOWLEDGE_ID: import.meta.env.VITE_VOICE_AGENT_ID || '', // Voice Agent ID (Interactive Avatar)
 };
 
 export const CONVAI_CONFIG = {
