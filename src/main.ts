@@ -33,16 +33,16 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <h1>AI Avatar Assistant</h1>
     
     <div class="platform-selector">
-        <button id="tabHeyGen" class="tab-btn active">HeyGen</button>
+        <button id="tabHeyGen" class="tab-btn active">LiveAvatar</button>
         <button id="tabTavus" class="tab-btn">Tavus</button>
         <button id="tabConvai" class="tab-btn">Convai</button>
     </div>
 
     <div id="avatarContainer" class="avatar-container">
-      <!-- HeyGen Section -->
+      <!-- LiveAvatar Section (Formerly HeyGen) -->
       <div id="heygenSection" class="avatar-section active">
         <div class="section-header">
-          <h2>HeyGen Interactive Avatar</h2>
+          <h2>LiveAvatar Interactive</h2>
           <div class="controls">
             <button id="heygenStartBtn" type="button">Start Session</button>
             <button id="heygenStopBtn" type="button" disabled>End Session</button>
@@ -617,23 +617,30 @@ function updateHeyGenStatus(message: string) {
 
 async function fetchAccessToken(): Promise<string> {
   try {
-    const response = await fetch('https://api.heygen.com/v1/streaming.create_token', {
+    const response = await fetch(`${AVATAR_CONFIG.BASE_PATH}/sessions/token`, {
       method: 'POST',
       headers: {
-        'x-api-key': HEYGEN_API_TOKEN,
+        'x-api-key': AVATAR_CONFIG.API_KEY,
         'Content-Type': 'application/json'
-      }
-    })
+      },
+      body: JSON.stringify({
+        mode: 'CUSTOM',
+        avatar_id: AVATAR_CONFIG.AVATAR_ID
+      })
+    });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch access token')
+      const errText = await response.text();
+      console.error('[LiveAvatar] Token Error:', errText);
+      throw new Error('Failed to fetch access token');
     }
 
-    const data = await response.json()
-    return data.data.token
+    const data = await response.json();
+    console.log('[LiveAvatar] Token Data:', data);
+    return data.data.token;
   } catch (error) {
-    console.error('[HeyGen] Error fetching access token:', error)
-    throw error
+    console.error('[LiveAvatar] Error fetching access token:', error);
+    throw error;
   }
 }
 
@@ -662,7 +669,10 @@ async function initializeAvatarSession() {
 
   try {
     const token = await fetchAccessToken()
-    avatar = new StreamingAvatar({ token })
+    avatar = new StreamingAvatar({
+      token,
+      basePath: AVATAR_CONFIG.BASE_PATH // IMPORTANT: Use LiveAvatar Endpoint
+    })
     sessionId = generateSessionId()
 
     avatar.on(StreamingEvents.STREAM_READY, handleStreamReady)
@@ -679,7 +689,7 @@ async function initializeAvatarSession() {
       isAvatarSpeaking = true
     })
     avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
-      console.log(`${ts()} [HeyGen] Avatar stopped talking event`);
+      console.log(`${ts()} [LiveAvatar] Avatar stopped talking event`);
       voiceStatus.textContent = 'Listening... (speak anytime)';
       isAvatarSpeaking = false;
       if (isVoiceModeActive && vadInitialized) {
@@ -689,41 +699,28 @@ async function initializeAvatarSession() {
 
     updateHeyGenStatus('Starting avatar...')
 
-    // Prepare Request Data
-    // Gemini Integration Mode: Standard Avatar with Voice ID
-    const requestData: any = {
+    // LiveAvatar Custom Mode Start Payload
+    // Uses 'newSession' or 'startSession' internally which maps to /sessions/new
+    // We pass minimal required params for Custom mode
+    sessionData = await avatar.createStartAvatar({
       quality: AvatarQuality.High,
       avatarName: AVATAR_CONFIG.AVATAR_ID,
       voice: {
-        voiceId: AVATAR_CONFIG.VOICE_ID,
-        // rate: 1.0, // Optional: Adjust speed
-        // emotion: VoiceEmotion.EXCITED // Optional
+        // Voice is technically handled by us / ignored in visual-only mode, 
+        // but required by type definition usually.
+        voiceId: AVATAR_CONFIG.VOICE_ID
       },
       language: 'en',
-      // disableIdleTimeout: false // DEPRECATED: Causing 400 errors in some cases. Use keepAlive() if needed.
-    };
+      disableIdleTimeout: false
+    });
 
-    console.log('[HeyGen] Starting with payload:', JSON.stringify(requestData, null, 2));
-
-    try {
-      sessionData = await avatar.createStartAvatar(requestData);
-    } catch (e: any) {
-      // Fallback: Try without specific voice if it fails (sometimes voice/avatar mismatch)
-      console.warn('[HeyGen] Start failed, retrying minimal payload...', e);
-      const minimalData = {
-        quality: AvatarQuality.Medium,
-        avatarName: AVATAR_CONFIG.AVATAR_ID,
-      };
-      sessionData = await avatar.createStartAvatar(minimalData);
-    }
-
-    console.log('[HeyGen] Session data:', sessionData)
+    console.log('[LiveAvatar] Session data:', sessionData)
     heygenSessionInfo.textContent = `Session ID: ${sessionData.session_id}`
 
     heygenStopBtn.disabled = false
 
   } catch (error) {
-    console.error('[HeyGen] Failed to initialize avatar session:', error)
+    console.error('[LiveAvatar] Failed to initialize avatar session:', error)
     updateHeyGenStatus(`Error: ${error}`)
     heygenStartBtn.disabled = false
   }
@@ -731,7 +728,7 @@ async function initializeAvatarSession() {
 
 function handleStreamReady(event: any) {
   updateHeyGenStatus('Stream ready!')
-  console.log('[HeyGen] Stream ready:', event)
+  console.log('[LiveAvatar] Stream ready:', event)
 
   if (event.detail && heygenVideo) {
     heygenVideo.srcObject = event.detail
@@ -746,7 +743,7 @@ function handleStreamReady(event: any) {
 
 function handleStreamDisconnected() {
   updateHeyGenStatus('Disconnected')
-  console.log('[HeyGen] Stream disconnected')
+  console.log('[LiveAvatar] Stream disconnected')
 }
 
 async function handleSpeak() {

@@ -5,9 +5,10 @@ export const MODELS = {
 };
 
 export const AVATAR_CONFIG = {
-  AVATAR_ID: import.meta.env.VITE_AVATAR_ID || '3448df7404a3424d9ca2543956ca010c', // Default HeyGen Avatar
-  VOICE_ID: import.meta.env.VITE_VOICE_ID || 'fdf0271569474704812328731b997e06',  // Default HeyGen Voice
-  KNOWLEDGE_ID: import.meta.env.VITE_VOICE_AGENT_ID || '', // Voice Agent ID (Interactive Avatar)
+  AVATAR_ID: import.meta.env.VITE_LIVEAVATAR_CHARACTER_ID || 'bf00036b-558a-44b5-b2ff-1e3cec0f4ceb',
+  VOICE_ID: 'en-US-Neural2-A', // Default voice for LiveAvatar/Custom mode
+  API_KEY: import.meta.env.VITE_LIVEAVATAR_API_KEY || '',
+  BASE_PATH: 'https://api.liveavatar.com/v1',
 };
 
 export const CONVAI_CONFIG = {
