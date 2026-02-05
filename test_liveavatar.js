@@ -39,6 +39,8 @@ function makeRequest(path, method, body = null) {
 async function test() {
     console.log('Testing LiveAvatar API (CUSTOM Mode)...');
 
+    let token = null;
+
     // Try CUSTOM mode
     console.log('\n--- Attempting Create Token (mode: CUSTOM) ---');
     try {
@@ -48,16 +50,53 @@ async function test() {
         };
         const tokenRes = await makeRequest('/sessions/token', 'POST', payload);
         console.log('Status:', tokenRes.status);
+        console.log('Raw Data:', JSON.stringify(tokenRes.data, null, 2)); // Add this
         if (tokenRes.status !== 200) {
             console.log('Response:', JSON.stringify(tokenRes.data, null, 2));
         } else {
-            console.log('✅ Token creation successful!');
-            if (tokenRes.data && tokenRes.data.data) {
-                console.log('Token:', tokenRes.data.data.token.substring(0, 20) + '...');
+            // Correct field is session_token
+            if (tokenRes.data && tokenRes.data.data && tokenRes.data.data.session_token) {
+                token = tokenRes.data.data.session_token;
+                console.log('Token (first 50):', token.substring(0, 50) + '...');
+            } else {
+                console.log('Warning: No session_token found. Full Data:', JSON.stringify(tokenRes.data, null, 2));
             }
         }
     } catch (e) {
-        console.error('Token Error:', e);
+        console.error('Token Error:', e.message);
+    }
+
+    if (token) {
+        console.log('\n--- Testing Session Start Endpoints ---');
+
+        const endpoints = ['/sessions/new', '/sessions/start', '/streaming.new'];
+
+        for (const ep of endpoints) {
+            console.log(`\nTesting endpoint: ${ep}`);
+            try {
+                // Note: We need to use the TOKEN for session start auth usually, or API Key.
+                // HeyGen SDK calls streaming.new with API Key? 
+                // Let's try with headers as configured.
+
+                const startRes = await makeRequest(ep, 'POST', {
+                    quality: 'medium',
+                    avatar_name: CHAR_ID, // Some use avatar_name, some avatar_id
+                    voice: { voice_id: 'en-US-Neural2-A' }
+                    // LiveAvatar might need different body?
+                });
+
+                console.log(`Status [${ep}]:`, startRes.status);
+                if (startRes.status === 200 || startRes.status === 201) {
+                    console.log(`✅ SUCCESS with endpoint: ${ep}`);
+                    console.log('Response:', JSON.stringify(startRes.data, null, 2));
+                    break;
+                } else {
+                    console.log(`❌ Failed [${ep}]. Msg:`, startRes.data?.message || startRes.status);
+                }
+            } catch (e) {
+                console.error(`Error [${ep}]:`, e.message);
+            }
+        }
     }
 }
 

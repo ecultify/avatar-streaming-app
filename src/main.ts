@@ -1,9 +1,9 @@
 import './style.css'
-import StreamingAvatar, {
-  AvatarQuality,
-  StreamingEvents,
-  TaskType,
-} from '@heygen/streaming-avatar'
+import {
+  LiveAvatarSession,
+  SessionEvent,
+  AgentEventsEnum,
+} from '@heygen/liveavatar-web-sdk'
 import DailyIframe from '@daily-co/daily-js';
 import { initializeVAD, startVAD, pauseVAD, resumeVAD, destroyVAD } from './utils/voiceActivityDetection'
 import { API_CONFIG, AVATAR_CONFIG, CONVAI_CONFIG } from './config'
@@ -122,7 +122,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   </div>
 `
 
-let avatar: StreamingAvatar | null = null
+let avatar: LiveAvatarSession | null = null
 let sessionId = generateSessionId()
 let sessionData: any = null
 let currentMode: 'text' | 'voice' = 'text'
@@ -669,26 +669,46 @@ async function initializeAvatarSession() {
 
   try {
     const token = await fetchAccessToken()
-    avatar = new StreamingAvatar({
-      token,
-      basePath: AVATAR_CONFIG.BASE_PATH // IMPORTANT: Use LiveAvatar Endpoint
+
+    // Create new LiveAvatarSession with the session token
+    avatar = new LiveAvatarSession(token, {
+      voiceChat: false, // We handle voice ourselves via VAD
     })
     sessionId = generateSessionId()
 
-    avatar.on(StreamingEvents.STREAM_READY, handleStreamReady)
-    avatar.on(StreamingEvents.STREAM_DISCONNECTED, handleStreamDisconnected)
+    // Set up event handlers using the new SDK events
+    avatar.on(SessionEvent.SESSION_STREAM_READY, () => {
+      updateHeyGenStatus('Stream ready!')
+      console.log('[LiveAvatar] Stream ready')
 
-    avatar.on(StreamingEvents.USER_START, () => {
+      // Attach the video stream to the video element
+      if (heygenVideo) {
+        avatar!.attach(heygenVideo)
+        heygenVideo.onloadedmetadata = () => {
+          heygenVideo.play().catch(console.error)
+          updateHeyGenStatus('Connected - Ready to chat!')
+          sendBtn.disabled = false
+          voiceModeBtn.disabled = false
+        }
+      }
+    })
+
+    avatar.on(SessionEvent.SESSION_DISCONNECTED, (reason) => {
+      updateHeyGenStatus('Disconnected: ' + reason)
+      console.log('[LiveAvatar] Stream disconnected:', reason)
+    })
+
+    avatar.on(AgentEventsEnum.USER_SPEAK_STARTED, () => {
       voiceStatus.textContent = 'Listening...'
     })
-    avatar.on(StreamingEvents.USER_STOP, () => {
+    avatar.on(AgentEventsEnum.USER_SPEAK_ENDED, () => {
       voiceStatus.textContent = 'Processing...'
     })
-    avatar.on(StreamingEvents.AVATAR_START_TALKING, () => {
+    avatar.on(AgentEventsEnum.AVATAR_SPEAK_STARTED, () => {
       voiceStatus.textContent = 'Avatar is speaking...'
       isAvatarSpeaking = true
     })
-    avatar.on(StreamingEvents.AVATAR_STOP_TALKING, () => {
+    avatar.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, () => {
       console.log(`${ts()} [LiveAvatar] Avatar stopped talking event`);
       voiceStatus.textContent = 'Listening... (speak anytime)';
       isAvatarSpeaking = false;
@@ -699,23 +719,11 @@ async function initializeAvatarSession() {
 
     updateHeyGenStatus('Starting avatar...')
 
-    // LiveAvatar Custom Mode Start Payload
-    // Uses 'newSession' or 'startSession' internally which maps to /sessions/new
-    // We pass minimal required params for Custom mode
-    sessionData = await avatar.createStartAvatar({
-      quality: AvatarQuality.High,
-      avatarName: AVATAR_CONFIG.AVATAR_ID,
-      voice: {
-        // Voice is technically handled by us / ignored in visual-only mode, 
-        // but required by type definition usually.
-        voiceId: AVATAR_CONFIG.VOICE_ID
-      },
-      language: 'en',
-      disableIdleTimeout: false
-    });
+    // Start the LiveAvatar session (calls /v1/sessions/start internally)
+    await avatar.start();
 
-    console.log('[LiveAvatar] Session data:', sessionData)
-    heygenSessionInfo.textContent = `Session ID: ${sessionData.session_id}`
+    console.log('[LiveAvatar] Session started successfully')
+    heygenSessionInfo.textContent = `Session Active`
 
     heygenStopBtn.disabled = false
 
@@ -726,25 +734,7 @@ async function initializeAvatarSession() {
   }
 }
 
-function handleStreamReady(event: any) {
-  updateHeyGenStatus('Stream ready!')
-  console.log('[LiveAvatar] Stream ready:', event)
-
-  if (event.detail && heygenVideo) {
-    heygenVideo.srcObject = event.detail
-    heygenVideo.onloadedmetadata = () => {
-      heygenVideo.play().catch(console.error)
-      updateHeyGenStatus('Connected - Ready to chat!')
-      sendBtn.disabled = false
-      voiceModeBtn.disabled = false
-    }
-  }
-}
-
-function handleStreamDisconnected() {
-  updateHeyGenStatus('Disconnected')
-  console.log('[LiveAvatar] Stream disconnected')
-}
+// Note: handleStreamReady and handleStreamDisconnected are now inline in initializeAvatarSession
 
 async function handleSpeak() {
   if (avatar && chatInput.value) {
@@ -768,10 +758,8 @@ async function handleSpeak() {
       hideProcessing()
       updateHeyGenStatus('Avatar speaking...')
 
-      await avatar.speak({
-        text: response,
-        taskType: TaskType.REPEAT
-      })
+      // Use repeat() method in new SDK (equivalent to speak with REPEAT task type)
+      avatar.repeat(response)
 
       updateHeyGenStatus('Ready')
       sendBtn.disabled = false
@@ -1000,10 +988,7 @@ async function processUserSpeech(audioBlob: Blob): Promise<void> {
 
     isAvatarSpeaking = true;
 
-    await avatar.speak({
-      text: response,
-      taskType: TaskType.REPEAT
-    });
+    await avatar.repeat(response);
 
     console.log(`${ts()} [Voice] ✅ Avatar finished speaking`);
     isAvatarSpeaking = false;
@@ -1341,7 +1326,7 @@ async function stopAvatarSession() {
     audioChunks = [];
 
     if (avatar) {
-      await avatar.stopAvatar();
+      await avatar.stop();
       heygenVideo.srcObject = null;
     }
 
@@ -1391,7 +1376,7 @@ stopSpeakingBtn.addEventListener('click', () => {
 window.addEventListener('beforeunload', () => {
   destroyVAD();
   if (avatar) {
-    avatar.stopAvatar();
+    avatar.stop();
   }
 });
 
